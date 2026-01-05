@@ -54,7 +54,7 @@ Longitudinal DNAm data are analyzed using linear mixed-effects models fit separa
 
 ## Model comparisons
 
-Multiple model specifications are fit to assess the contribution of different covariate sets and comparisons are performed using likelihood-based criteria (e.g. AIC)
+Multiple model specifications are fit to assess the contribution of different covariates and comparisons are performed using likelihood-based criteria (e.g. AIC)
 
 - Base longitudinal model (time + demographic covariates)
 - Models including genetic risk measures
