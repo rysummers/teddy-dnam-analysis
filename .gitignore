@@ -7,8 +7,11 @@ raw/
 processed/
 
 # Outputs (may contain sensitive values)
-results/
-figures/
+results/**
+!results/.gitkeep
+
+figures/**
+!figures/.gitkeep
 
 # R / RStudio
 .Rhistory
