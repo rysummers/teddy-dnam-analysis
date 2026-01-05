@@ -1,2 +1,76 @@
-# teddy-dnam-analysis
-Analysis and annotation of CpG sites identified from the TEDDY DNA methylation study
+# TEDDY DNAm Longitudinal Analysis
+
+This project aims to analyze longitudinal DNA methylation (DNAm) changes in the TEDDY cohort and to identify genetic and environmental factors associated with type 1 diabetes (T1D) risk.
+
+The primary objectives are:
+
+1. **Catalog methylation changes over time**  
+   - Characterize developmental DNAm trajectories.
+
+2. **Identify CpG sites that change over time**  
+   - Fit longitudinal models to identify CpGs with non-zero slopes.
+   - Quantify within- and between-subject variability in methylation change.
+
+3. **Evaluate multi-site variability**  
+   - Compare DNAm trajectories across multiple TEDDY study sites.
+   - Assess site-level heterogeneity.
+
+4. **Compare genetic and environmental models**  
+   - Fit and compare models incorporating:
+     - genetic risk measures
+     - environmental exposure variables
+   - Evaluate which factors explain variation in baseline DNAm and longitudinal change.
+
+5. **Identify exposure covariates associated with methylation change**  
+   - Examine exposure–time interactions.
+   - Identify exposures that modify the rate of DNAm change over time.
+  
+6. **Evaluate non-linear time trends for specific CpG sites (may be too computationally expensive or difficult to interpret)**  
+  - Compare linear vs non-linear age functions (quadratic terms, piecewise) to capture early-life curvatures in DNAm trajectories.
+  - Identify CpGs with evidence of non-linearity (AIC/LRT or cross-validation) and summarize the type of change (rapid infancy change, developmental windows)
+  
+## Study background 
+
+TEDDY is a prospective cohort study designed to identify environmental triggers of type 1 diabetes (T1D) in genetically at-risk children. While genetic susceptibility is necessary, it is not sufficient to cause disease. This study focuses on early-life epigenetic patterns, measured via DNAm, as potential mediators of environmental exposure.
+
+## Modeling strategy
+
+Longitudinal DNAm data are analyzed using linear mixed-effects models fit separately for each CpG site.
+
+### Core model structure
+
+- **Outcome:** DNAm beta value (transformed M-values)
+- **Time variable:** Age (centered at birth)
+- **Random effects:**
+  - Subject-specific intercept (baseline DNAm value)
+  - Subject-specific slope (rate of DNAm change over time)
+- **Fixed effects:**
+  - Time (**test non-linear functions of time??**)
+  - Sex
+  - Cell-type composition
+  - Study site (when applicable)
+  - Exposure covariates (TBD)
+
+
+## Model comparisons
+
+Multiple model specifications are fit to assess the contribution of different covariate sets and comparisons are performed using likelihood-based criteria (e.g. AIC)
+
+- Base longitudinal model (time + demographic covariates)
+- Models including genetic risk measures
+- Models including environmental exposure variables
+- Models including non-linear functions of time (quadratic or piecewise)
+
+
+## Downstream analyses
+
+- exposure association analyses
+- hypothesis generation related to T1D risk 
+
+
+
+
+
+
+
+
