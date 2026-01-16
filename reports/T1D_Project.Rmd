@@ -1,0 +1,523 @@
+---
+title: "T1D - Teddy Project"
+author: "Ryan Summers"
+date: "2026-01-06"
+output:
+  word_document: default
+  pdf_document: default
+  html_document:
+    css: style.css
+bibliography: t1d.bib
+csl: "apa-5th-edition.csl"
+nocite: '@*'
+---
+
+```{r setup, include=FALSE}
+library(BiocManager)
+library(knitr)
+library(ggplot2)
+library(tidyverse)
+library(magrittr)
+library(ggfortify)
+library(olsrr)
+library(kableExtra)
+library(doBy)
+library(MASS)
+library(dplyr)
+library(table1)
+library(gtsummary)
+library(gt)
+library(stringdist)
+library(ggrepel)
+library(pwr)
+library(ssize)
+library(samr)
+#library(simpleaffy)
+library(parallel)
+library(BiocParallel)
+library(impute)
+library(limma)
+library(qvalue)
+library(gtools)
+library(multtest)
+library(GEOquery)
+library(Biobase)
+library(data.table)
+library(SummarizedExperiment)
+library(variancePartition)
+#library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+#library(IlluminaHumanMethylationEPICv2anno.20a1.hg38)
+library(minfi)
+library(R.utils)
+library(stringr)
+#library(IlluminaHumanMethylationEPICmanifest)
+library(methylKit)
+library(shinyMethyl)
+library(minfi)
+library(bumphunter)
+#library(IlluminaHumanMethylation450kmanifest)
+#library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+library(qs)
+library(qs2)
+library(lme4)
+library(sesame)
+library(sva)
+library(EmpiricalBrownsMethod)
+#library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+#library(org.Hs.eg.db)
+library(clusterProfiler)
+library(patchwork)
+library(ggmanh)
+library(survival)
+library(lme4)
+library(SummarizedExperiment)
+library(variancePartition)
+library(lmerTest)
+library(future.apply)
+library(data.table)
+```
+
+
+
+```{r}
+# TEMP for local testing
+# setwd(paste0(Sys.getenv("RKJCOLLAB"), "/Maternal_Protection"))
+# matrix_path <- "data/teddy/TEDDYarrays/preprocessing-dnam/mSet-norm-batch-mean-plate-row.Rdata"
+# sample_ids_path <- "data/teddy/TEDDYarrays/samples-for-analysis.csv"
+# pheno_path <- "data/teddy/TEDDYarrays/preprocessing-dnam/phenoData_v2.csv"
+# model_path <- "/Users/slacksa/repos/explore_matprot/TEDDYcode/2-analysis/Functions/getSubSpecificInt_randomIntAndSlopeModel.R"
+# # model_path <- "/Users/slacksa/repos/explore_matprot/TEDDYcode/2-analysis/Functions/getSubSpecificInt_randomIntModel.R"
+# cell_types_path <- "data/teddy/TEDDYarrays/cell proportions/cell_counts_rescaled.csv"
+# cov_list <- "factor(gender),new_CD8T,new_CD4T,new_NK,new_Bcell,new_Mono"
+# # cov_list <- "factor(gender)"
+# cov_list <- unlist(strsplit(cov_list, ","))
+```
+
+
+```{r}
+# # load in M-value matrix
+# M_read <- load("/Volumes/Storage/Maternal_Protection/data/teddy/TEDDYarrays/preprocessing-dnam/mSet-norm-batch-mean-plate-row.Rdata")
+# 
+# # save file using serialization - quicker
+# qsave(mSet.norm.mean.plate_row, "/Volumes/Storage/Maternal_Protection/data/teddy/TEDDYarrays/preprocessing-dnam/M.matrix.qs", preset = "fast", nthreads = 6)
+```
+
+
+```{r}
+# load in qs file
+M.matrix <- qread("/Volumes/Storage/Maternal_Protection/data/teddy/TEDDYarrays/preprocessing-dnam/M.matrix.qs", nthreads = 8)
+
+qsave(M.matrix, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/raw/M.matrix.qs", nthreads = 6)
+```
+
+
+```{r}
+# read in phenotype
+pheno <- read.csv("/Volumes/Storage/Maternal_Protection/data/teddy/TEDDYarrays/preprocessing-dnam/phenoData_v2.csv")
+```
+
+
+```{r}
+length(unique(pheno$maskid))
+```
+
+
+```{r}
+# Load list of IDs to keep in analysis
+sample_ids_df <- read.csv("/Volumes/Storage/Maternal_Protection/data/teddy/TEDDYarrays/samples-for-analysis.csv")
+sample_ids <- sample_ids_df$rgName
+```
+
+
+```{r}
+# Load cell type proportions
+cell_types <- read.csv("/Volumes/Storage/Maternal_Protection/data/teddy/TEDDYarrays/cell proportions/cell_counts_rescaled.csv")
+```
+
+
+```{r}
+# Filter matrix to just samples for analysis
+matrix.filt <- M.matrix[, which(colnames(M.matrix) %in% sample_ids)]
+
+# save matrix file to local
+qsave(matrix.filt, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/matrix.filt.qs", nthreads = 6)
+
+# load matrix
+matrix.filt <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/matrix.filt.qs", nthreads = 6)
+```
+
+```{r}
+# Rename pheno to match function code & filter to just samples want in analysis
+pheno_filt <- pheno %>%
+  dplyr::filter(rgName %in% sample_ids)
+```
+
+```{r}
+# Add cell types to pheno
+  # TO NOTE: model should include all cell types except for neutrophils, doing
+  # this essentially sets neutrophils as reference
+pheno_filt_ct <- left_join(pheno_filt, cell_types,
+                           by = c("Sample_Name" = "samplemaskid"))
+
+# center age
+pheno_filt_ct$age_c <- pheno_filt_ct$sample_agedys - mean(pheno_filt_ct$sample_agedys)
+
+# save to csv
+write.csv(pheno_filt_ct, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno.csv")
+qsave(pheno_filt_ct, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno_filt_ct.qs", nthreads = 6)
+```
+
+
+```{r}
+# load in pheno file
+pheno_filt_ct <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno_filt_ct.qs", nthreads = 6)
+```
+
+
+
+```{r}
+pheno_filt_ct %>% 
+  filter(maskid == 205235)
+```
+
+
+```{r}
+# number of patients
+length(unique(pheno_filt_ct$maskid))
+```
+
+
+```{r}
+# measurement stats
+pheno_filt_ct %>% 
+  group_by(maskid) %>%
+  summarise(n_measurements = n()) -> mnts_per_id 
+
+mnts_per_id %>%   
+  summarise(avg = mean(n_measurements),
+            min = min(n_measurements),
+            med = median(n_measurements),
+            max = max(n_measurements))
+
+hist(mnts_per_id$n_measurements, breaks = 12, freq = FALSE)
+```
+
+## Extract cg25271479 from matrix.filt and merge into phenotype
+
+```{r}
+
+# CpG of interest
+cpg <- "cg25271479"
+
+# confirm CpG exists in the matrix
+stopifnot(cpg %in% rownames(matrix.filt))
+
+# extract M-values for CpG across samples (named by rgName)
+meth_vec <- matrix.filt[cpg, ]
+stopifnot(all(names(meth_vec) == colnames(matrix.filt)))
+
+# Merge into phenotype by rgName
+pheno_df <- pheno_filt_ct %>%
+  mutate(
+    meth = meth_vec[rgName],
+    age_days = sample_agedys,
+    endpt_days = case_endptage)
+
+# Check merge worked
+cat("N rows:", nrow(pheno_df), "\n")
+cat("N missing meth:", sum(is.na(pheno_df$meth)), "\n")
+summary(pheno_df$meth)
+
+```
+
+
+## Sanity check: confirm 1:1 sets
+
+```{r}
+check_sets <- pheno_df %>%
+  dplyr::distinct(case_ind, maskid, outcome, endpt_days) %>%
+  group_by(case_ind) %>%
+  summarise(
+    n_ids = n_distinct(maskid),
+    n_cases = sum(outcome == 1),
+    n_ctrls = sum(outcome == 0),
+    endpt_unique = n_distinct(endpt_days),
+    .groups = "drop")
+
+table(check_sets$n_ids)
+table(check_sets$n_cases)
+table(check_sets$endpt_unique)
+
+bad_sets <- check_sets %>% 
+  filter(n_ids != 2 | n_cases != 1 | endpt_unique != 1)
+bad_sets
+
+```
+
+
+
+```{r}
+# pick one CpG
+probe1 <- rownames(matrix.filt)[6645]
+
+res1 <- mod_function_fast(
+  probe = "cg25271479",
+  matrix = matrix.filt,
+  pheno = pheno_filt_ct,
+  sample_var = "rgName",   # <-- column names of matrix (rgName)
+  id_var = "maskid",          
+  age_var = "sample_agedys",  
+  covs = c("gender", "cc"),   
+  return_blups = FALSE)
+
+res1
+```
+Eigenvalue: 
+0.0345 - Substantial random-effects variability
+5×10⁻⁹- Essentially zero variability
+
+Interpretation
+There is strong subject-to-subject variability in one direction (intercept), and almost none in the other (slope-related direction).
+
+* Eigenvalues > 0 → matrix is positive definite (good)
+* Very small eigenvalues → one direction has almost no variance
+*	≈ 0 eigenvalue → model is near-singular
+	
+	
+
+	
+```{r}
+library(future.apply)
+library(data.table)
+
+future::plan(future::multicore, workers = 6)   # adjust workers
+options(future.globals.maxSize = 25 * 1024^3)  # 25GB for globals
+```
+
+A wrapper that calls your single-CpG function
+
+This is where the “parallelization outside” happens: we create a function that fits one CpG, and future_lapply runs many instances of it in parallel.
+
+```{r}
+fit_one_cpg <- function(probe) {
+  mod_function_fast(
+    probe = probe,
+    matrix = matrix.filt,
+    pheno = pheno_filt_ct,
+    sample_var = "rgName",    # <-- change
+    id_var = "maskid",           # <-- change
+    age_var = "sample_agedys",   # <-- change
+    covs = c("gender", "cc"),    # <-- change
+    return_blups = FALSE         # keep FALSE for speed
+  )}
+
+```
+
+	
+	
+Run a small parallel test first	
+```{r}
+future::plan(future::multicore, workers = 6)
+future::plan()
+options(future.globals.maxSize = 20 * 1024^3)  # 20 GiBb
+
+system.time({
+  
+test_probes <- rownames(matrix.filt)[1:39548] # dim = 790944x1407
+test_res <- future_lapply(test_probes, fit_one_cpg)
+test_res <- data.table::rbindlist(test_res, fill = TRUE)
+print(test_res[1:3]) 
+
+})
+
+# save to csv
+write.csv(test_res, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/test_res.csv")
+```
+    user   system  elapsed 
+8063.489   73.480 8139.559 
+
+Estimated time to run all CpGs on my system:
+20*8139.559 = 162791.2sec ≈ 2,714min ≈ 45.2hrs ≈ 2days
+
+
+
+
+
+Full run: chunk CpGs and write each chunk to disk (recommended)
+
+With ~791k CpGs, do not store all results in RAM.
+Below stores to disk to not overwhelm RAM
+```{r}
+probes <- rownames(matrix.filt)
+
+chunk_size <- 2000
+chunks <- split(probes, ceiling(seq_along(probes) / chunk_size))
+
+out_dir <- "lme_chunks" # <----- SET DIRECTORY FOR LARGE FILES!!
+dir.create(out_dir, showWarnings = FALSE)
+
+chunk_files <- future_lapply(seq_along(chunks), function(k) {
+  chunk <- chunks[[k]]
+
+  res_list <- lapply(chunk, fit_one_cpg)
+  res <- data.table::rbindlist(res_list, fill = TRUE)
+
+  fn <- file.path(out_dir, sprintf("chunk_%04d.csv.gz", k))
+  data.table::fwrite(res, fn)
+  fn
+})
+
+# chunk_files is a vector of file paths (one per chunk)
+length(chunk_files)
+```
+
+
+Later, you can read and combine only what you need:
+```{r}
+files <- list.files(out_dir, full.names = TRUE, pattern = "chunk_.*\\.csv\\.gz$")
+res_all <- data.table::rbindlist(lapply(files, data.table::fread), fill = TRUE)
+```
+
+Optional: second pass for BLUPs only on selected CpGs
+
+Once you filter CpGs from res_all (or chunk-by-chunk), compute BLUPs only for a manageable subset:
+```{r}
+top_cpgs <- res_all[fit_status != "error" & p_slope < 1e-4, CpG]
+top_cpgs <- unique(top_cpgs)[1:200]
+
+fit_one_cpg_blup <- function(probe) {
+  mod_function_fast(
+    probe = probe,
+    matrix = matrix,
+    pheno = pheno,
+    sample_var = "sample_id",
+    id_var = "maskid",
+    age_var = "sample_agedys",
+    covs = c("gender", "cc"),
+    return_blups = TRUE
+  )
+}
+
+blup_dir <- "blups_selected"
+dir.create(blup_dir, showWarnings = FALSE)
+
+blup_files <- future_lapply(top_cpgs, function(p) {
+  out <- fit_one_cpg_blup(p)
+  fn <- file.path(blup_dir, paste0(p, ".rds"))
+  saveRDS(out, fn)
+  fn
+})
+```
+
+
+
+	
+```{r}
+m2beta <- function(m) {
+  2^m / (1 + 2^m)}
+```
+	
+```{r}
+m2beta(0)
+```
+
+
+
+
+```{r}
+
+res2 <- mod.function(
+  probe = "cg25271479",
+  matrix = matrix.filt,
+  pheno = pheno_filt_ct,
+  sample_var = "rgName",   
+  id_var = "maskid",          
+  age_var = "sample_agedys", 
+  covs = c("gender", "cc"))
+
+print(res2)
+```
+
+
+## Sanity check for custom functions
+
+```{r}
+# now fit new summarized experiment object w/ filtered CpGs
+pheno_ordered <- pheno_filt_ct[match(colnames(matrix.filt), pheno_filt_ct$rgName), ]
+stopifnot(all(!is.na(pheno_ordered$rgName)))
+
+# build the SummarizedExperiment
+se.filt <- SummarizedExperiment(
+  assays = list(Mvalue = matrix.filt),
+  colData = as.data.frame(pheno_ordered))
+```
+
+
+```{r}
+# formula
+form <- ~ sample_agedys + gender + cc  + (1 + sample_agedys | maskid)
+```
+
+```{r}
+# set up parallelization
+n.cores <- parallel::detectCores() - 1
+param <- SnowParam(2, type = "SOCK", progressbar = T)  
+```
+
+```{r}
+# fit the model - uses REML by default
+system.time({
+  fitDream <- dream(exprObj = assay(se.filt, "Mvalue"), 
+                  formula = form, 
+                  data = colData(se.filt), 
+                  ## 209 subjects: Satterthwaite is justified (>100)
+                  ddf = "Satterthwaite", 
+                  BPPARAM = param) })
+```
+
+
+```{r}
+cg25271479_df <- colData(se.filt) %>% 
+  as.data.frame() %>%
+  mutate(methylation = assay(se.filt, "Mvalue")["cg25271479", ])
+
+## There is no exact, universally accepted denominator df because FE estimates
+## depend on RE str and var components
+## Therefore, lmer() omits p-values because df are ambiguous; in practice, lmerTest (Satterthwaite) is the standard way to obtain them, especially for large-scale longitudinal omics analyses.
+cg25271479.lmer.model <- lmer(
+  methylation ~ sample_agedys + gender + cc + (sample_agedys | maskid),
+  data = cg25271479_df)
+
+summary(cg25271479.lmer.model)
+
+## The REML likelihood depends on the fixed‐effects design matrix
+## REML integrates out fixed effects
+## If you compare models with different fixed effects, the REML likelihoods are not comparable
+ranova(cg25271479.lmer.model)
+
+```
+
+```{r}
+isSingular(cg25271479.lmer.model, tol = getSingTol())
+getSingTol()
+```
+
+How to see what is singular in your model
+```{r}
+VarCorr(cg25271479.lmer.model)
+```
+
+
+```{r}
+cg25271479.lme.model <- lme(
+  methylation ~ sample_agedys + gender + cc ,
+  random = ~ sample_agedys | maskid,
+  data = cg25271479_df)
+
+summary(cg25271479.lme.model)
+```
+
+
+
+
+
