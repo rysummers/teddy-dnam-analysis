@@ -1,0 +1,24 @@
+/* Center the title, author, and date */
+h1.title, h4.author, h4.date {
+  text-align: center;
+}
+
+body {
+  font-size: 14px;   /* default ~16px */
+}
+
+pre code {
+  font-size: 13px;   /* code blocks */
+}
+
+h1, h2, h3, h4 {
+  font-size: 90%;   /* headings relative to body */
+}
+
+blockquote {
+  font-size: 96%;      /* smaller than normal text */
+  color: #444;         /* optional: softer color */
+  margin-left: 1em;
+  padding-left: 1em;
+  border-left: 3px solid #cccccc;
+}
