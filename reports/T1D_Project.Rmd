@@ -77,6 +77,17 @@ library(future.apply)
 library(data.table)
 ```
 
+```{r}
+
+
+BiocManager::install(c(
+  "SummarizedExperiment",
+  "BiocParallel",
+  "variancePartition"))
+
+```
+
+
 
 
 ```{r}
@@ -131,7 +142,7 @@ sample_ids <- sample_ids_df$rgName
 
 ```{r}
 # Load cell type proportions
-cell_types <- read.csv("/Volumes/Storage/Maternal_Protection/data/teddy/TEDDYarrays/cell proportions/cell_counts_rescaled.csv")
+cell_types <- read.csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/cell_counts_rescaled.csv")
 ```
 
 
@@ -141,9 +152,15 @@ matrix.filt <- M.matrix[, which(colnames(M.matrix) %in% sample_ids)]
 
 # save matrix file to local
 qsave(matrix.filt, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/matrix.filt.qs", nthreads = 6)
+```
 
+```{r}
 # load matrix
 matrix.filt <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/matrix.filt.qs", nthreads = 6)
+
+# save into new qs2 package
+qs_save(matrix.filt, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/matrix.filt.qs2",
+        nthreads = 6)
 ```
 
 ```{r}
@@ -159,11 +176,21 @@ pheno_filt <- pheno %>%
 pheno_filt_ct <- left_join(pheno_filt, cell_types,
                            by = c("Sample_Name" = "samplemaskid"))
 
-# center age
-pheno_filt_ct$age_c <- pheno_filt_ct$sample_agedys - mean(pheno_filt_ct$sample_agedys)
+# convert to years and center to help with different scale issue when modeling
+pheno_filt_ct$age_yrs_c <-
+  (pheno_filt_ct$sample_agedys / 365.25) -
+  mean(pheno_filt_ct$sample_agedys / 365.25)
+
+# scale the cell covariates
+covars <- c("new_Bcell", "new_CD4T", "new_CD8T",
+            "new_Mono", "new_NK")
+
+pheno_filt_ct[covars] <- scale(pheno_filt_ct[covars])
+
+
 
 # save to csv
-write.csv(pheno_filt_ct, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno.csv")
+write.csv(pheno_filt_ct, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno_scaled.csv")
 qsave(pheno_filt_ct, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno_filt_ct.qs", nthreads = 6)
 ```
 
@@ -332,13 +359,27 @@ print(test_res[1:3])
 
 # save to csv
 write.csv(test_res, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/test_res.csv")
+
+# load csv
+test_res <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/test_res.csv")
 ```
     user   system  elapsed 
-8063.489   73.480 8139.559 
+8063.489   73.480 8139.559 - 2.3hrs 
 
 Estimated time to run all CpGs on my system:
 20*8139.559 = 162791.2sec ≈ 2,714min ≈ 45.2hrs ≈ 2days
 
+
+```{r}
+# % of convergence issues based on 5% sample of 790,944 CpG sites
+sum(!is.na(test_res$error_message)) / nrow(test_res) # 3.2%
+```
+
+```{r}
+subset(test_res, CpG == "cg25271479")
+dplyr::filter(test_res, CpG == "cg25271479")
+test_res[test_res$CpG == "cg25271479", ]
+```
 
 
 
@@ -446,34 +487,230 @@ print(res2)
 pheno_ordered <- pheno_filt_ct[match(colnames(matrix.filt), pheno_filt_ct$rgName), ]
 stopifnot(all(!is.na(pheno_ordered$rgName)))
 
+# test a small sample
+set.seed(2522)
+idx <- sample(nrow(matrix.filt), 5000)
+matrix.sample <- matrix.filt[idx, , drop = F]
+
+pheno_ordered <- pheno_filt_ct[match(colnames(matrix.sample), pheno_filt_ct$rgName), ]
+stopifnot(all(!is.na(pheno_ordered$rgName)))
+
 # build the SummarizedExperiment
 se.filt <- SummarizedExperiment(
-  assays = list(Mvalue = matrix.filt),
+  assays = list(Mvalue = matrix.sample), #[1:39548,]
   colData = as.data.frame(pheno_ordered))
+
 ```
 
 
 ```{r}
 # formula
-form <- ~ sample_agedys + gender + cc  + (1 + sample_agedys | maskid)
+form <- ~ age_yrs_c + gender + cc + new_Bcell + new_CD4T + new_CD8T + new_Mono + new_NK + (1 + age_yrs_c | maskid)
 ```
 
 ```{r}
 # set up parallelization
 n.cores <- parallel::detectCores() - 1
-param <- SnowParam(2, type = "SOCK", progressbar = T)  
+param <- SnowParam(5, type = "SOCK", progressbar = T)  
+param <- MulticoreParam(workers = 5, progressbar = T)
 ```
 
 ```{r}
 # fit the model - uses REML by default
 system.time({
-  fitDream <- dream(exprObj = assay(se.filt, "Mvalue"), 
-                  formula = form, 
-                  data = colData(se.filt), 
-                  ## 209 subjects: Satterthwaite is justified (>100)
-                  ddf = "Satterthwaite", 
-                  BPPARAM = param) })
+  dream.model2 <- suppressWarnings(
+    dream(exprObj = assay(se.filt, "Mvalue"), 
+          formula = form, 
+          data = colData(se.filt), 
+          ddf = "Satterthwaite", 
+          BPPARAM = param))
+  })
+
+qsave(dream.model2, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream.model2.qs", preset = "fast", nthreads = 6)
 ```
+
+user   system  elapsed 
+39.413   10.947 1176.774 - 19.6min
+
+Est full:
+≈ 392min ≈ 6.5hrs - 6.9x faster than custom function
+
+```{r}
+# view top results 
+tt_T1DAge <- topTable(dream.model, coef = "diseaseCase:age_years",
+         number = Inf, sort.by = "B") 
+
+sig_tt <- topTable(dream.model, coef = "diseaseCase:age_years",
+         number = Inf, sort.by = "B") 
+
+nrow(subset(dream_test_res, adj.P.Val < 0.05))
+
+# save to csv
+dream_test_res <- topTable(dream.model2, number = Inf)
+write.csv(dream_test_res, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream_test_res.csv")
+```
+
+```{r}
+# number of significant CpGs based on adjusted p-value
+nrow(subset(dream_test_res, adj.P.Val < 0.05))
+nrow(subset(dream_test_res, adj.P.Val < 0.05)) / nrow(matrix.filt[1:39548,])
+
+```
+
+
+```{r}
+# Empirical Bayes - pulls info across all CpGs (stabilizes variances) 
+dream.model.EB <- eBayes(dream.model)
+
+# qs methods - soon to be deprecated
+qsave(dream.model.EB, "dream.model.EB.qs", preset = "fast", nthreads = 6)
+
+
+# load dream object
+system.time({
+  dream.model.EB <- qread("dream.model.EB.qs", nthreads = 8)
+  })
+
+
+```
+
+
+Using Kenwood-Rogers to compare computational time an estimates
+
+```{r}
+# fit the model - uses REML by default
+system.time({
+  dream.model.KR <- suppressWarnings(
+    dream(exprObj = assay(se.filt, "Mvalue"), 
+          formula = form, 
+          data = colData(se.filt), 
+          ddf = "Kenward-Roger", 
+          BPPARAM = param))
+  })
+
+qsave(dream.model.KR, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream.model.KR.qs", preset = "fast", nthreads = 6)
+```
+    user   system  elapsed 
+7136.401   72.690 1229.091 ~ 20.5min
+
+
+```{r}
+# save to csv
+dream_test_res.KR <- topTable(dream.model.KR, number = Inf)
+write.csv(dream_test_res.KR, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream_test_res.KR.csv")
+```
+
+```{r}
+nrow(subset(dream_test_res.KR, adj.P.Val < 0.05)) / nrow(matrix.filt[1:39548,])
+```
+
+
+
+## Test singularity issues from Dream for CpGs that gave issues in nlme pipeline
+
+```{r}
+# identify CpGs that didnt converge
+# CpGs that threw an nlme error
+bad_cpgs <- unique(test_res$CpG[!is.na(test_res$error_message)])
+
+length(bad_cpgs)
+head(bad_cpgs)
+
+all_cpgs <- rownames(assay(se.filt, "Mvalue"))
+bad_cpgs <- intersect(bad_cpgs, all_cpgs)
+
+length(bad_cpgs)
+
+
+```
+
+
+
+```{r}
+
+cpgs <- bad_cpgs
+
+# 1) Precompute formula ONCE
+form_cpg <- update(form, CpG ~ .)
+
+# 2) Keep only columns used by the formula (big speed win)
+vars_needed <- setdiff(all.vars(form_cpg), "CpG")
+base_dat <- as.data.frame(colData(se.filt)[, vars_needed, drop = FALSE])
+
+# 3) Pull the response matrix ONCE
+Y <- assay(se.filt, "Mvalue")[cpgs, , drop = FALSE]
+
+# 4) Chunk work to reduce Snow overhead
+chunk_size <- 50
+idx <- split(seq_along(cpgs), ceiling(seq_along(cpgs) / chunk_size))
+
+res_list <- unlist(
+  bplapply(
+    idx,
+    function(ii, Y, base_dat, form_cpg) {
+      out <- vector("list", length(ii))
+      for (k in seq_along(ii)) {
+        i <- ii[k]
+        dat <- base_dat
+        dat$CpG <- as.numeric(Y[i, ])
+
+        m <- tryCatch(
+          suppressWarnings(
+            lmer(form_cpg, data = dat, REML = TRUE)
+            ),
+          error = function(e) NULL
+          )
+
+        if (is.null(m)) {
+          out[[k]] <- list(is_sing = NA, conv_msg = "lmer error")
+        } else {
+          msg <- m@optinfo$conv$lme4$messages
+          out[[k]] <- list(
+            is_sing  = lme4::isSingular(m, tol = 1e-4),
+            conv_msg = if (length(msg)) paste(unlist(msg), collapse = " | ") else ""
+          )
+        }
+      }
+      out
+    },
+    Y = Y, base_dat = base_dat, form_cpg = form_cpg,
+    BPPARAM = param
+  ),
+  recursive = FALSE
+)
+
+is_sing  <- vapply(res_list, `[[`, logical(1), "is_sing")
+conv_msg <- vapply(res_list, `[[`, character(1), "conv_msg")
+
+sing_df <- data.frame(CpG = cpgs, 
+                      is_singular = is_sing, 
+                      lmer_messages = conv_msg)
+
+table(sing_df$is_singular, useNA = "ifany")
+
+# write to csv
+write.csv(sing_df, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/sing_df.csv")
+```
+
+
+```{r}
+sing_df <- data.frame(
+  CpG = cpgs,
+  is_singular = vapply(res_list, `[[`, logical(1), "is_sing"),
+  lmer_messages = vapply(res_list, `[[`, character(1), "conv_msg"),
+  stringsAsFactors = FALSE
+)
+
+table(sing_df$is_singular, useNA = "ifany")
+head(subset(sing_df, is_singular))
+
+
+```
+
+“For each CpG we attempted a random-slope model. When fits were singular or showed convergence issues, we refit using a reduced random-effects structure (uncorrelated slope or random-intercept only). CpGs were excluded only if the reduced model failed or had insufficient observations.”
+
+
+
 
 
 ```{r}
