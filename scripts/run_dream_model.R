@@ -46,7 +46,7 @@ se.filt <- SummarizedExperiment(
   colData = as.data.frame(pheno_ordered))
 
 # model formula
-form <- ~ age_yrs_c + gender + cc + new_Bcell + new_CD4T + new_CD8T + new_Mono + new_NK +
+form <- ~ age_yrs_c + gender + new_Bcell + new_CD4T + new_CD8T + new_Mono + new_NK +
   (1 + age_yrs_c | maskid)
 
 # BiocParallel param

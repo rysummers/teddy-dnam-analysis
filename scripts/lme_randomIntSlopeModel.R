@@ -35,7 +35,7 @@
 
 
 # faster cleaner version
-mod_function <- function(
+mod_function_lme <- function(
     probe,
     matrix,
     pheno,
@@ -67,6 +67,25 @@ mod_function <- function(
   # Add CpG to pheno by matching sample IDs (preserves order)
   sid <- pheno[[sample_var]]
   pheno$CpG <- cpg[as.character(sid)]
+  
+  # Check for sample ID mismatches w/ M-matrix
+  sid_chr <- as.character(pheno[[sample_var]])
+  missing_sids <- setdiff(unique(sid_chr), colnames(matrix))
+  if (length(missing_sids) > 0) {
+    return(data.frame(
+      CpG = probe, fit_status="error",
+      warn_message=NA_character_,
+      error_message=paste0("Sample IDs in pheno not found in matrix: ", length(missing_sids)),
+      stringsAsFactors=FALSE
+    ))
+  }
+  
+  # Also: duplicates in pheno sample ids can be a problem
+  if (anyDuplicated(sid_chr)) {
+    # not necessarily wrong in longitudinal data, but should match intent:
+    # if each row is a visit, sample_var should be visit/sample ID, not subject ID
+  }
+  
   
   # keep complete cases for CpG, id, age (and covariates if provided)
   needed <- c("CpG", id_var, age_var, covs)

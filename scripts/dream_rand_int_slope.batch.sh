@@ -20,7 +20,7 @@ mamba activate myenv
 # ---- Paths ----
 data_dir="/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis"
 
-pheno="${data_dir}/pheno_scaled.csv"
+pheno="${data_dir}/pheno.csv"
 matrix_qs2="${data_dir}/matrix.filt.qs2"
 out_qs2="${data_dir}/results/dream.model.qs2"
 r_script="${data_dir}/run_dream_model.R"

@@ -42,7 +42,7 @@ pheno_filt_ct <- read_csv(pheno)
 
 # convert subject ID, site, and gender to factors
 pheno_filt_ct <- pheno_filt_ct %>% 
-  mutate(across(c(maskid, cc, gender), as.factor))
+  mutate(across(c(maskid, cc, gender, CaseControl), as.factor))
 
 matrix.filt   <- qs_read(matrix_qs2, nthreads = min(6, workers))
 
@@ -54,7 +54,7 @@ source("/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis/lme_randomIntSlop
 t0 <- Sys.time()
 
 fit_cpg <- function(probe) {
-  mod_function(
+  mod_function_lme(
     probe = probe,
     matrix = matrix.filt,
     pheno = pheno_filt_ct,

@@ -1,5 +1,5 @@
 ---
-title: "T1D - Teddy Project"
+title: "T1D - TEDDY Project"
 author: "Ryan Summers"
 date: "2026-01-06"
 output:
@@ -32,7 +32,6 @@ library(ggrepel)
 library(pwr)
 library(ssize)
 library(samr)
-#library(simpleaffy)
 library(parallel)
 library(BiocParallel)
 library(impute)
@@ -45,26 +44,19 @@ library(Biobase)
 library(data.table)
 library(SummarizedExperiment)
 library(variancePartition)
-#library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
-#library(IlluminaHumanMethylationEPICv2anno.20a1.hg38)
 library(minfi)
 library(R.utils)
 library(stringr)
-#library(IlluminaHumanMethylationEPICmanifest)
 library(methylKit)
 library(shinyMethyl)
 library(minfi)
 library(bumphunter)
-#library(IlluminaHumanMethylation450kmanifest)
-#library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
 library(qs)
 library(qs2)
 library(lme4)
 library(sesame)
 library(sva)
 library(EmpiricalBrownsMethod)
-#library(TxDb.Hsapiens.UCSC.hg19.knownGene)
-#library(org.Hs.eg.db)
 library(clusterProfiler)
 library(patchwork)
 library(ggmanh)
@@ -89,7 +81,8 @@ install.packages(c(
   "", ""))
 ```
 
-Prior analyses reference code
+## Data Storage and Loading
+
 ```{r}
 # TEMP for local testing
 # setwd(paste0(Sys.getenv("RKJCOLLAB"), "/Maternal_Protection"))
@@ -113,14 +106,22 @@ Prior analyses reference code
 # qsave(mSet.norm.mean.plate_row, "/Volumes/Storage/Maternal_Protection/data/teddy/TEDDYarrays/preprocessing-dnam/M.matrix.qs", preset = "fast", nthreads = 6)
 ```
 
-Loads data from personal external drive
+Load data from personal external drive
 ```{r}
-# load in qs file
-M.matrix <- qread("/Volumes/Storage/Maternal_Protection/data/teddy/TEDDYarrays/preprocessing-dnam/M.matrix.qs", nthreads = 8)
-
-qsave(M.matrix, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/raw/M.matrix.qs", nthreads = 6)
+# # load in qs file
+# M.matrix <- qread("/Volumes/Storage/Maternal_Protection/data/teddy/TEDDYarrays/preprocessing-dnam/M.matrix.qs", nthreads = 8)
+# 
+# qsave(M.matrix, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/raw/M.matrix.qs", nthreads = 6)
 ```
 
+850K Annotation
+```{r}
+# Load DNAm annotation
+load(file="/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/raw/annotation.850K.Rdata")
+```
+
+
+## Phenotype & M-Matrix Data Management & Cleanup
 
 ```{r}
 # read in phenotype
@@ -149,20 +150,17 @@ matrix.filt <- M.matrix[, which(colnames(M.matrix) %in% sample_ids)]
 qsave(matrix.filt, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/matrix.filt.qs", nthreads = 6)
 ```
 
+### Load M-Matrix
+
 ```{r}
 # load matrix
 matrix.filt <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/matrix.filt.qs", nthreads = 6)
 
-# save into new qs2 package
-qs_save(matrix.filt, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/matrix.filt.qs2",
-        nthreads = 6)
+# # save into new qs2 package
+# qs_save(matrix.filt, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/matrix.filt.qs2", nthreads = 6)
 ```
 
-```{r}
-# Rename pheno to match function code & filter to just samples want in analysis
-pheno_filt <- pheno %>%
-  dplyr::filter(rgName %in% sample_ids)
-```
+### Load Pheno
 
 ```{r}
 # Add cell types to pheno
@@ -189,26 +187,55 @@ qsave(pheno_filt_ct, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/proces
 
 
 ```{r}
-# load in pheno file 
-pheno_filt_ct <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno_filt_ct.qs", nthreads = 6)
+# load in original pheno file 
+pheno_filt_ct_unscaled <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno_filt_ct.qs", nthreads = 6)
+
+# pheno_filt_ct_unscaled <- read.csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno.csv",header=T)
 ```
 
 ```{r}
+# convert age to years for scalability in model running
+pheno_filt_ct_unscaled$age_yrs_c <-
+  (pheno_filt_ct_unscaled$sample_agedys / 365.25) -
+  mean(pheno_filt_ct_unscaled$sample_agedys / 365.25)
+
+# convert age to years for scalability in modeul running
+pheno_filt_ct_unscaled$age_yrs <- pheno_filt_ct_unscaled$sample_agedys / 365.25
+
+# # save to csv
+# write.csv(pheno_filt_ct_unscaled, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno.csv")
+```
+
+
+```{r}
 # load in pheno scaled file 
-pheno_filt_ct <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno_scaled.csv")
+pheno_filt_ct_scaled <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno_scaled.csv")
 ```
 
 ```{r}
 # convert needed variables to factors
-pheno_filt_ct <- pheno_filt_ct %>% 
-  mutate(across(c(maskid, cc, gender), as.factor))
+pheno_filt_ct_unscaled <- pheno_filt_ct_unscaled %>% 
+  mutate(across(c(maskid, cc, gender, CaseControl), as.factor))
 
+
+pheno_filt_ct_scaled <- pheno_filt_ct_scaled %>% 
+  mutate(across(c(maskid, cc, gender, CaseControl), as.factor))
 ```
 
 
+## Exploratory Data Analysis (EDA)
+
 ```{r}
 # number of patients
-length(unique(pheno_filt_ct$maskid))
+length(unique(pheno_filt_ct_unscaled$maskid))
+```
+
+```{r}
+# missing value percentages
+pheno_filt_ct_scaled %>%
+  ungroup() %>% 
+  miss_var_summary()
+
 ```
 
 
@@ -227,19 +254,64 @@ mnts_per_id %>%
 hist(mnts_per_id$n_measurements, breaks = 12, freq = FALSE)
 ```
 
+```{r}
+# determine number of subjects that would give "stable" estimates
+subj <- pheno_filt_ct_scaled %>%
+  group_by(maskid) %>%
+  summarise(
+    n_obs = n(),
+    n_age_unique = n_distinct(sample_agedys), 
+    .groups = "drop")
 
+round(c(
+  n_subjects = nrow(subj),
+  n_subjects_slope_ok = sum(subj$n_age_unique >= 2),
+  n_subjects_slope_better = sum(subj$n_age_unique >= 3),
+  pct_slope_ok = mean(subj$n_age_unique >= 2),
+  pct_slope_better = mean(subj$n_age_unique >= 3)), 3)
 
-## Sanity check: confirm 1:1 sets
+unique(lme_results$error_message)
+
+```
 
 ```{r}
-check_sets <- pheno_df %>%
-  dplyr::distinct(case_ind, maskid, outcome, endpt_days) %>%
+# check that whole-blood samples have variability
+covs <- c("new_Bcell","new_CD4T","new_CD8T","new_Mono","new_NK")
+sds <- sapply(pheno_filt_ct_unscaled[, covs], sd, na.rm=TRUE)
+which(sds == 0 | is.na(sds))
+colSums(!is.finite(as.matrix(pheno_filt_ct_unscaled[, covs])))
+
+```
+
+```{r}
+vars <- c("age_yrs_c","new_Bcell","new_CD4T","new_CD8T","new_Mono","new_NK")
+sapply(pheno_filt_ct_scaled[, vars], function(x) sum(!is.finite(x)))
+
+sapply(pheno_filt_ct_unscaled[, c("new_Bcell","new_CD4T","new_CD8T","new_Mono","new_NK")],
+       function(x) sd(x, na.rm = TRUE))
+
+```
+
+```{r}
+# Confirm sample ID matching across the entire dataset
+sid <- as.character(pheno_filt_ct_scaled$rgName)
+mean(sid %in% colnames(matrix.filt))       # should be 1
+sum(!(sid %in% colnames(matrix.filt)))     # should be 0
+
+```
+
+Sanity check: confirm 1:1 sets
+* is there a match for each case indicator? Other words, a case & control for each indicator
+
+```{r}
+check_sets <- pheno_filt_ct_scaled %>%
+  dplyr::distinct(case_ind, maskid, outcome, case_endptage) %>%
   group_by(case_ind) %>%
   summarise(
     n_ids = n_distinct(maskid),
     n_cases = sum(outcome == 1),
     n_ctrls = sum(outcome == 0),
-    endpt_unique = n_distinct(endpt_days),
+    endpt_unique = n_distinct(case_endptage),
     .groups = "drop")
 
 table(check_sets$n_ids)
@@ -253,23 +325,240 @@ bad_sets
 ```
 
 
+### Spaghetti plots
 
 ```{r}
-# pick one CpG
-probe1 <- rownames(matrix.filt)[6645]
+getSpagPlot <- function(CpG, mvals, pheno, anno) {
+  # error handling
+  stopifnot(CpG %in% rownames(mvals))
+  stopifnot(CpG %in% rownames(anno))
+  stopifnot("rgName" %in% names(pheno))
+  stopifnot(all(c("sample_agedys","maskid") %in% names(pheno)))
 
-res1 <- mod_function_fast(
-  probe = "cg25271479",
-  matrix = matrix.filt,
-  pheno = pheno_filt_ct,
-  sample_var = "rgName",   # <-- column names of matrix (rgName)
-  id_var = "maskid",          
-  age_var = "sample_agedys",  
-  covs = c("gender", "cc"),   
-  return_blups = FALSE)
+  # match matrix column names by rgName in pheno
+  samp <- intersect(colnames(mvals), pheno$rgName)
+  if (length(samp) == 0) 
+    stop("No overlap between colnames(matrix) and pheno$rgName")
 
-res1
+  # build plotting data
+  toPlot <- pheno[match(samp, pheno$rgName), , drop = F] # match sample names to pheno
+  toPlot$CpG_value <- as.numeric(mvals[CpG, samp]) # match CpG & sample name to matrix
+
+  # annotation for title
+  a <- anno[CpG, , drop = F]
+  title <- paste0(
+    CpG, " (", a$UCSC_RefGene_Name, ") ",
+    a$chr, ": ", prettyNum(a$pos, big.mark = ","))
+
+  ggplot(toPlot, aes(x = sample_agedys, y = CpG_value, group = maskid)) +
+    geom_line(alpha = 0.4) +
+    theme_bw() +
+    ylab(paste0(CpG, " (Beta value)")) +
+    labs(title = title) +
+    theme(plot.title = element_text(size = 7))
+}
+
+
+
+#plots <- lapply(df$CpG, getSpagPlot, toPlot = toPlot, anno = anno)
+p <- getSpagPlot("cg10631356", 
+                 mvals = matrix.filt, 
+                 pheno = pheno_filt_ct_unscaled, 
+                 anno = anno)
+p
+
 ```
+
+
+Function to identify specific CpGs and provide pheno information from the CpG
+```{r}
+cpg_report <- function(
+    CpG, # CpG(s) of interest
+    mvals, # M-value matrix
+    pheno, # phenotype data set
+    anno, # annotation dataset - 850k
+    pheno_id = "rgName", # column in pheno file that matches matrix columns
+    outlier_method = c("iqr","z"), # outlier calculation
+    z_thresh = 3, # number of deviations away from mean for z-test 
+    DNAm_values = c("M", "beta")  # return M- or beta-values
+    ) 
+  {
+  # enforce
+  outlier_method <- match.arg(outlier_method)
+  DNAm_values  <- match.arg(DNAm_values)
+  
+  # M to Beta function
+  m_to_beta <- function(M) {
+    p <- 2^M
+    p / (p + 1)
+  }
+  
+  # error handling 
+  if (!CpG %in% rownames(anno)) stop("CpG not in rownames(anno): ", CpG)
+  
+  cpg_in_rows <- CpG %in% rownames(mvals)
+  cpg_in_cols <- CpG %in% colnames(mvals)
+  if (!cpg_in_rows && !cpg_in_cols) stop("CpG not found in mvals: ", CpG)
+  
+  if (!pheno_id %in% names(pheno)) stop("pheno_id column not in pheno: ", pheno_id)
+  
+  # extract values from M-Matrix 
+  vals <- if (cpg_in_rows) mvals[CpG, ] else mvals[, CpG]
+  vals <- as.numeric(vals)
+  names(vals) <- if (cpg_in_rows) colnames(mvals) else rownames(mvals)
+  
+  # convert M -> Beta if chosen
+  if (DNAm_values == "beta") {
+    vals <- m_to_beta(vals)
+  }
+  
+  # match to pheno dataset 
+  keep <- intersect(names(vals), pheno[[pheno_id]])
+  df <- pheno[match(keep, pheno[[pheno_id]]), , drop = F]
+  df$CpG_value <- vals[keep]
+  
+  # dentify outliers 
+  x <- df$CpG_value
+  if (outlier_method == "iqr") {
+    q1 <- quantile(x, 0.25, na.rm = T)
+    q3 <- quantile(x, 0.75, na.rm = T)
+    iqr <- q3 - q1
+    lo <- q1 - 1.5 * iqr
+    hi <- q3 + 1.5 * iqr
+    df$is_outlier <- x < lo | x > hi
+    df$outlier_score <- NA_real_
+    outlier_rule <- list(method="iqr", lo=lo, hi=hi, q1=q1, q3=q3, iqr=iqr)
+  } else {
+    z <- (x - mean(x, na.rm = T)) / sd(x, na.rm = T)
+    df$is_outlier <- abs(z) >= z_thresh
+    df$outlier_score <- z
+    outlier_rule <- list(method="z", z_thresh=z_thresh)
+  }
+  
+  # annotation  
+  a <- anno[CpG, , drop = F]
+  
+  # summaries 
+  df_sorted <- df[order(df$CpG_value), ]
+  outliers <- df[df$is_outlier %in% T, , drop = F]
+  
+  # convert to a large list for organization
+  list(
+    CpG = CpG,
+    DNAm_scale = DNAm_values,
+    anno = a,
+    outlier_rule = outlier_rule,
+    summary = summary(df$CpG_value),
+    n = nrow(df),
+    n_outliers = nrow(outliers),
+    outliers = outliers,
+    lowest = head(df_sorted, 10),
+    highest = head(df_sorted[rev(seq_len(nrow(df_sorted))), ], 10),
+    data = df)
+  }
+```
+
+
+```{r}
+rep <- cpg_report("cg10631356", 
+                  matrix.filt, 
+                  pheno_filt_ct_unscaled, 
+                  anno, 
+                  outlier_method="z", z_thresh = 3)
+
+# extract CpG values for each subject along w/ pheno data
+rep$data
+
+# get outliers
+rep$outliers
+```
+
+
+
+## Sample Modeling Runs
+
+```{r}
+# test a small sample
+set.seed(2522)
+idx <- sample(nrow(matrix.filt), 500)
+matrix.sample <- matrix.filt[idx, , drop = F]
+
+pheno_ordered <- pheno_filt_ct_unscaled[match(colnames(matrix.sample), 
+                                     pheno_filt_ct_unscaled$rgName), ]
+stopifnot(all(!is.na(pheno_ordered$rgName)))
+```
+
+Testing singular CpGs produced from lmeR model w/bobyqa optimizer
+```{r}
+cpgs_to_test <- lmeR_bobyqa_results[lmeR_bobyqa_results$is_singular==TRUE,]$CpG
+matrix.sample <- matrix.filt[cpgs_to_test, , drop = F]
+
+pheno_ordered <- pheno_filt_ct_unscaled[match(colnames(matrix.sample), 
+                                     pheno_filt_ct_unscaled$rgName), ]
+stopifnot(all(!is.na(pheno_ordered$rgName)))
+```
+
+
+
+### lmeR Run
+
+```{r}
+# fit model
+t0 <- Sys.time()
+
+# testing different optimizer settings
+ctrl <- lme4::lmerControl(
+  optimizer = "bobyqa",
+  optCtrl = list(maxfun = 2e5)) #1e5 is default
+
+fit_cpg <- function(probe) {
+  mod_function_lmer(
+    probe = probe,
+    matrix = matrix.sample,
+    pheno = pheno_filt_ct_unscaled,
+    sample_var = "rgName",    
+    id_var = "maskid",           
+    age_var = "age_yrs",   
+    covs = c("gender", "cc", "CaseControl", "new_Bcell", "new_CD4T", 
+             "new_CD8T", "new_Mono", "new_NK"),    
+    return_blups = FALSE, # keep FALSE for speed
+    control = ctrl,
+    random_slope = age_var # 1 is intercept only
+  )}
+
+# set number of cores
+future::plan(future::multicore, workers = 6)
+options(future.globals.maxSize = 20 * 1024^3)  # 20 GiBb
+
+test_probes <- rownames(matrix.sample) # dim = 790944x1407
+test_res <- future_lapply(test_probes, fit_cpg)
+test_res <- data.table::rbindlist(test_res, fill = TRUE)
+
+qsave(
+  test_res, 
+  "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/lmeR_int_only_singular.qs")
+
+t1 <- Sys.time()
+
+message("lmeR runtime: ", 
+        round(as.numeric(difftime(t1, t0, units = "mins")), 2), 
+        " minutes")
+```
+
+```{r}
+nrow(test_res %>% filter(!is.na(warn_message)))
+nrow(test_res %>% filter(!is.na(error_message)))
+```
+
+"Model failed to converge with max|grad| = 0.00399344 (tol = 0.002, component 1)":
+
+That warning means lmer returned estimates, but the optimizer stopped with a gradient that’s a bit larger than the default tolerance. In plain terms:
+
+* the algorithm got close to the optimum, but not close enough to declare full convergence.
+
+So the results aren’t automatically “wrong,” but you should treat that CpG’s fit as potentially unreliable (especially SEs / variance components).
+
+
 Eigenvalue: 
 0.0345 - Substantial random-effects variability
 5×10⁻⁹- Essentially zero variability
@@ -281,20 +570,6 @@ There is strong subject-to-subject variability in one direction (intercept), and
 * Very small eigenvalues → one direction has almost no variance
 *	≈ 0 eigenvalue → model is near-singular
 	
-	
-
-	
-```{r}
-library(future.apply)
-library(data.table)
-
-future::plan(future::multicore, workers = 6)   # adjust workers
-options(future.globals.maxSize = 25 * 1024^3)  # 25GB for globals
-```
-
-A wrapper that calls your single-CpG function
-
-This is where the “parallelization outside” happens: we create a function that fits one CpG, and future_lapply runs many instances of it in parallel.
 
 ```{r}
 # form <- ~ age_yrs_c + gender + cc + new_Bcell + new_CD4T + new_CD8T + 
@@ -314,9 +589,8 @@ fit_cpg <- function(probe) {
 
 ```
 
-	
-	
 Run a small parallel test first	
+
 ```{r}
 future::plan(future::multicore, workers = 6)
 future::plan()
@@ -342,11 +616,6 @@ Estimated time to run all CpGs on my system:
 
 
 ```{r}
-# % of convergence issues based on 5% sample of 790,944 CpG sites
-sum(!is.na(test_res$error_message)) / nrow(test_res) # 3.2%
-```
-
-```{r}
 # extract errors from test run
 error_cpgs <- test_res[test_res$fit_status == "error", "CpG"]$CpG
 
@@ -361,20 +630,11 @@ m2beta <- function(m) {
 ```
 	
 
-## DREAM function analysis
+## DREAM Modeling Analysis
 
 ```{r}
 # now fit new summarized experiment object w/ filtered CpGs
 pheno_ordered <- pheno_filt_ct[match(colnames(matrix.filt), pheno_filt_ct$rgName), ]
-stopifnot(all(!is.na(pheno_ordered$rgName)))
-
-# test a small sample
-set.seed(2522)
-idx <- sample(nrow(matrix.filt), 5000)
-matrix.sample <- matrix.filt[idx, , drop = F]
-
-pheno_ordered <- pheno_filt_ct[match(colnames(matrix.sample), 
-                                     pheno_filt_ct$rgName), ]
 stopifnot(all(!is.na(pheno_ordered$rgName)))
 
 # build the SummarizedExperiment
@@ -387,7 +647,7 @@ se.filt <- SummarizedExperiment(
 
 ```{r}
 # formula
-form <- ~ age_yrs_c + gender + cc + new_Bcell + new_CD4T + new_CD8T + new_Mono + new_NK + (1 | maskid)
+form <- ~ age_yrs_c + gender + new_Bcell + new_CD4T + new_CD8T + new_Mono + new_NK + (1 | maskid)
 ```
 
 ```{r}
@@ -435,16 +695,30 @@ dream.model <- qs_read("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/d
         nthreads = 6)
 ```
 
+```{r}
+# load in dream results
+dream_results <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream_res.qs", nthreads = 6)
+```
+
+
+## Dream Model Diagnostics
+
+```{r}
+# load in DREAM results
+#dream_results <- read.csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream_res.csv")
+dream.model <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream.model.qs", 
+                       nthreads = 6)
+```
 
 ```{r}
 # use topTable to view results
-dream_res <- topTable(dream.model, number = Inf)
+dream_results <- topTable(dream.model, number = Inf)
 
 # save by serialization
-qsave(dream_res, "dream_res.qs", nthreads=6)
+qsave(dream_results, "dream_results.qs", nthreads=6)
 
 # write to csv
-write.csv(dream_res, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream_res.csv")
+write.csv(dream_results, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream_results.csv")
 
 # number of significant CpGs after
 nrow(subset(dream_res, adj.P.Val < 0.05))
@@ -457,11 +731,9 @@ sig_tt <- topTable(dream.model, coef = "diseaseCase:age_years",
 ```
 
 
-## Model Diagnostics
-
 ```{r}
 all_cpgs    <- rownames(matrix.filt)
-modeled_cpgs <- rownames(dream.model)
+modeled_cpgs <- dream_results$X
 
 # how many CpGs were dropped from model
 length(setdiff(all_cpgs, modeled_cpgs))
@@ -477,11 +749,8 @@ summary(apply(matrix.filt[dropped, ], 1, var))
 
 ```{r}
 # number of significant CpGs based on adjusted p-value
-nrow(subset(dream_res, adj.P.Val < 0.05))
-nrow(subset(dream_res, adj.P.Val < 0.05)) / nrow(matrix.filt)
-
-nrow(subset(test_res, p_slope < 0.05))
-nrow(subset(test_res, p_slope < 0.05)) / nrow(test_res)
+nrow(subset(dream_results, adj.P.Val < 0.05))
+nrow(subset(dream_results, adj.P.Val < 0.05)) / nrow(matrix.filt)
 
 ```
 
@@ -515,7 +784,13 @@ lambda
 ```
 
 
+The below Emprirical Bayes method has been shown to be inefficient:
 
+"We note that an earlier version (before v1.15.5 from September 5, 2019) of dream in the
+variancePartition package included an empirical Bayes step. However, after additional
+testing, we removed this step so that only gene-level estimates are used in the linear mixed
+model. We note that the elevated false positive rate that Yu et al. (2019) observed in simu-
+lations using dream are due this this issue and has been resolved." - Hoffman et al 2020 supp
 ```{r}
 # Empirical Bayes - pulls info across all CpGs (stabilizes variances) 
 dream.model.EB <- eBayes(dream.model)
@@ -529,145 +804,10 @@ system.time({
   dream.model.EB <- qread("dream.model.EB.qs", nthreads = 8)
   })
 
-
 ```
 
-
-Using Kenwood-Rogers to compare computational time an estimates
-
-```{r}
-# fit the model - uses REML by default
-system.time({
-  dream.model.KR <- suppressWarnings(
-    dream(exprObj = assay(se.filt, "Mvalue"), 
-          formula = form, 
-          data = colData(se.filt), 
-          ddf = "Kenward-Roger", 
-          BPPARAM = param))
-  })
-
-qsave(dream.model.KR, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream.model.KR.qs", preset = "fast", nthreads = 6)
-```
-    user   system  elapsed 
-7136.401   72.690 1229.091 ~ 20.5min
-
-
-```{r}
-# save to csv
-dream_test_res.KR <- topTable(dream.model.KR, number = Inf)
-write.csv(dream_test_res.KR, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream_test_res.KR.csv")
-```
-
-```{r}
-nrow(subset(dream_test_res.KR, adj.P.Val < 0.05)) / nrow(matrix.filt[1:39548,])
-```
-
-
-
-## Test singularity issues from Dream for CpGs that gave issues in nlme pipeline
-
-```{r}
-# identify CpGs that didnt converge
-# CpGs that threw an nlme error
-bad_cpgs <- unique(test_res$CpG[!is.na(test_res$error_message)])
-
-length(bad_cpgs)
-head(bad_cpgs)
-
-all_cpgs <- rownames(assay(se.filt, "Mvalue"))
-bad_cpgs <- intersect(bad_cpgs, all_cpgs)
-
-length(bad_cpgs)
-
-
-```
-
-
-
-```{r}
-
-cpgs <- bad_cpgs
-
-# 1) Precompute formula ONCE
-form_cpg <- update(form, CpG ~ .)
-
-# 2) Keep only columns used by the formula (big speed win)
-vars_needed <- setdiff(all.vars(form_cpg), "CpG")
-base_dat <- as.data.frame(colData(se.filt)[, vars_needed, drop = FALSE])
-
-# 3) Pull the response matrix ONCE
-Y <- assay(se.filt, "Mvalue")[cpgs, , drop = FALSE]
-
-# 4) Chunk work to reduce Snow overhead
-chunk_size <- 50
-idx <- split(seq_along(cpgs), ceiling(seq_along(cpgs) / chunk_size))
-
-res_list <- unlist(
-  bplapply(
-    idx,
-    function(ii, Y, base_dat, form_cpg) {
-      out <- vector("list", length(ii))
-      for (k in seq_along(ii)) {
-        i <- ii[k]
-        dat <- base_dat
-        dat$CpG <- as.numeric(Y[i, ])
-
-        m <- tryCatch(
-          suppressWarnings(
-            lmer(form_cpg, data = dat, REML = TRUE)
-            ),
-          error = function(e) NULL
-          )
-
-        if (is.null(m)) {
-          out[[k]] <- list(is_sing = NA, conv_msg = "lmer error")
-        } else {
-          msg <- m@optinfo$conv$lme4$messages
-          out[[k]] <- list(
-            is_sing  = lme4::isSingular(m, tol = 1e-4),
-            conv_msg = if (length(msg)) paste(unlist(msg), collapse = " | ") else ""
-          )
-        }
-      }
-      out
-    },
-    Y = Y, base_dat = base_dat, form_cpg = form_cpg,
-    BPPARAM = param
-  ),
-  recursive = FALSE
-)
-
-is_sing  <- vapply(res_list, `[[`, logical(1), "is_sing")
-conv_msg <- vapply(res_list, `[[`, character(1), "conv_msg")
-
-sing_df <- data.frame(CpG = cpgs, 
-                      is_singular = is_sing, 
-                      lmer_messages = conv_msg)
-
-table(sing_df$is_singular, useNA = "ifany")
-
-# write to csv
-write.csv(sing_df, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/sing_df.csv")
-```
-
-
-```{r}
-sing_df <- data.frame(
-  CpG = cpgs,
-  is_singular = vapply(res_list, `[[`, logical(1), "is_sing"),
-  lmer_messages = vapply(res_list, `[[`, character(1), "conv_msg"),
-  stringsAsFactors = FALSE
-)
-
-table(sing_df$is_singular, useNA = "ifany")
-head(subset(sing_df, is_singular))
-
-
-```
 
 “For each CpG we attempted a random-slope model. When fits were singular or showed convergence issues, we refit using a reduced random-effects structure (uncorrelated slope or random-intercept only). CpGs were excluded only if the reduced model failed or had insufficient observations.”
-
-
 
 
 
@@ -692,10 +832,7 @@ ranova(cg25271479.lmer.model)
 
 ```
 
-```{r}
-isSingular(cg25271479.lmer.model, tol = getSingTol())
-getSingTol()
-```
+
 
 How to see what is singular in your model
 ```{r}
@@ -703,14 +840,233 @@ VarCorr(cg25271479.lmer.model)
 ```
 
 
-```{r}
-cg25271479.lme.model <- lme(
-  methylation ~ sample_agedys + gender + cc ,
-  random = ~ sample_agedys | maskid,
-  data = cg25271479_df)
+## lme & lmeR Alpine Model Results 
 
-summary(cg25271479.lme.model)
+```{r}
+# load in Step1B original model results
+step1b_og_results <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/step1b_og_results.qs", nthreads = 6)
 ```
+
+```{r}
+step1b_scaled_results <- qs_read("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/Step1B_Model_scaled.qs2", nthreads = 6)
+```
+
+```{r}
+# load lme modeling results from Alpine
+lme_results <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/lme_results.csv") %>% select(-1)
+```
+
+```{r}
+# load lmeR modeling results from Alpine
+lmeR_results <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/lmeR_results.csv") %>% select(-1)
+```
+
+```{r}
+# load lmeR modeling results using bobyqa optimizer from Alpine
+lmeR_bobyqa_results <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/lmeR_bobyqa_results.csv") %>% select(-1)
+```
+
+
+### Exploration Convergence Issues
+
+```{r}
+length(lme_results$var.rand.slope < 1e-8) # should matrix M-matrix
+mean(lme_results$var.rand.slope < 1e-8, na.rm=TRUE)
+summary(lme_results$var.rand.slope)
+
+```
+
+~5.3% of CpGs have effectively zero random‐slope variance
+* there is no between‐subject heterogeneity in age slope
+
+```{r}
+# check data matrix (X) for redundancy - DOES NOT EVALUATE Z
+mv <- ~ age_yrs_c + gender + cc + new_Bcell + new_CD4T + new_CD8T + new_Mono + new_NK
+X <- model.matrix(mv, data = pheno_filt_ct_scaled)
+
+qr(X)$rank
+ncol(X)
+kappa(X)
+
+```
+
+* Full rank -> no exact collinearity?
+* How close the matrix is to being singular
+  * Large singular value -> strong direction in predictor space
+  * Small singular value -> nearly redundant / weakly identifiable direction
+  
+It does not say anything about:
+* random-effects variance structure
+* boundary variance estimates
+* random slope identifiability
+* covariance singularities
+
+This is why kappa looks good, and we still get convergence warnings. They come from the random-effects (Z), not from X
+
+```{r}
+# check that whole-blood samples have variability
+covs <- c("new_Bcell","new_CD4T","new_CD8T","new_Mono","new_NK")
+sds <- sapply(pheno_filt_ct_unscaled[, covs], sd, na.rm=TRUE)
+which(sds == 0 | is.na(sds))
+colSums(!is.finite(as.matrix(pheno_filt_ct_unscaled[, covs])))
+
+```
+
+```{r}
+vars <- c("sample_agedys","new_Bcell","new_CD4T","new_CD8T","new_Mono","new_NK")
+sapply(pheno_filt_ct_unscaled[, vars], function(x) sum(!is.finite(x)))
+
+sapply(pheno_filt_ct_unscaled[, c("new_Bcell","new_CD4T","new_CD8T","new_Mono","new_NK")],
+       function(x) sd(x, na.rm = TRUE))
+
+```
+
+
+
+### Identify CpGs that did not converge
+
+```{r}
+# identify CpGs not fit in Step1B model
+step1b_bad_cpgs <- step1b_og_results %>% filter(!is.na(message))
+```
+
+```{r}
+# Step1B with scaled variables - CpGs that did not fit
+step1b_scaled_bad_cpgs <- step1b_scaled_results %>% filter(!is.na(message))
+```
+
+```{r}
+# lme model CpGs that did not fit (my script)
+lme_bad_cpgs <- lme_results %>% filter(!is.na(error_message))
+```
+
+```{r}
+# lmeR model CpGs that did not fit (my script)
+## the lmeR provides estimates for every CpG but comes w/ convergence warnings
+lmeR_bad_cpgs <- lmeR_results %>% filter(!is.na(warn_message))
+```
+
+```{r}
+# lmeR model, using bobyqa optimizer, CpGs that did not fit
+## the lmeR provides estimates for every CpG but comes w/ convergence warnings
+lmeR_bobyqa_bad_cpgs <- lmeR_bobyqa_results %>% filter(!is.na(warn_message))
+```
+
+```{r}
+# how many of the "bad" CpGs overlap between the models
+cat("Step1B, lme, lmeR, and lmeR w/bobyqa had", 
+    length(intersect(step1b_bad_cpgs$CpG, lme_bad_cpgs$CpG, 
+                     lmeR_bad_cpgs, lmeR_bobyqa_bad_cpgs)), 
+    "overlapping CpGs that failed\n")
+
+# unique CpGs to all models
+unique_step1b <- setdiff( # finds all rows in x that aren't in y : setdiff(x,y)
+  step1b_bad_cpgs$CpG,
+  lme_bad_cpgs$CpG)
+
+cat("Step1B had", length(unique_step1b), "unique CpGs that failed\n")
+
+unique_lme <- setdiff(
+  lme_bad_cpgs$CpG,
+  step1b_bad_cpgs$CpG)
+
+cat("LME had", length(unique_lme), "unique CpGs that failed\n")
+
+```
+
+lme runtime: 406.77 minutes ~ 6.8hrs
+dream runtime: 219.8 minutes ~ 3.66hrs
+
+Number of singular fits using lmeR
+```{r}
+cat("lmeR model w/ default optimization had",
+    nrow(lmeR_results[lmeR_results$is_singular==TRUE,]),
+    "singular fits\n\n")
+
+cat("lmeR model w/ bobyqa optimization had",
+    nrow(lmeR_bobyqa_results[lmeR_bobyqa_results$is_singular==TRUE,]),
+    "singular fits\n")
+```
+
+
+
+Compare number of significant slopes across methods before multiple-testing adjustment
+```{r}
+
+# Step1B OG
+cat("Step1B model had", 
+    nrow(subset(step1b_og_results, fixed.sample_agedys.p.value < 0.05)), 
+    "significant slopes representing", 
+    100*round(nrow(subset(step1b_og_results, fixed.sample_agedys.p.value < 0.05)) / 
+      nrow(step1b_og_results),3), "% of total CpG tested\n\n")
+
+
+# lme - mine
+cat("lme model had", 
+    nrow(subset(lme_results, p_slope < 0.05)), 
+    "significant slopes representing", 
+    100*round(nrow(subset(lme_results, p_slope < 0.05)) / 
+      nrow(lme_results),3), "% of total CpG tested\n\n")
+
+# lmeR 
+cat("lmeR model had", 
+    nrow(subset(lmeR_results, p_slope < 0.05)), 
+    "significant slopes representing", 
+    100*round(nrow(subset(lmeR_results, p_slope < 0.05)) / 
+      nrow(lmeR_results),3), "% of total CpG tested\n\n")
+
+# lmeR w/ bobyqa optimization
+cat("lmeR model w/bobyqa optimization had", 
+    nrow(subset(lmeR_bobyqa_results, p_slope < 0.05)), 
+    "significant slopes representing", 
+    100*round(nrow(subset(lmeR_bobyqa_results, p_slope < 0.05)) / 
+      nrow(lmeR_bobyqa_results),3), "% of total CpG tested\n")
+
+```
+Identify CpGs that had a significant slope but was singular - var(slope)≈0
+```{r}
+lmeR_bobyqa_results <- lmeR_bobyqa_results %>% 
+  mutate(sig_singular = ifelse(
+    is_singular == TRUE & p_slope<0.05, "Trouble", "Good"
+  ))
+
+lmeR_results <- lmeR_results %>% 
+  mutate(sig_singular = ifelse(
+    is_singular == TRUE & p_slope<0.05, "Trouble", "Good"
+  ))
+
+
+# number of CpGs with a significant slope but was singular
+cat("lmeR w/default optimization had",
+    nrow(lmeR_results[lmeR_results$sig_singular=="Trouble",]),
+    "CpGs with a significant slope but was singular\n", 
+    "(subjects are inferred to have same slope)\n\n")
+
+cat("lmeR w/bobyqa optimization had",
+    nrow(lmeR_bobyqa_results[lmeR_bobyqa_results$sig_singular=="Trouble",]),
+    "CpGs with a significant slope but was singular\n", 
+    "(subjects are inferred to have same slope)")
+```
+
+lmeR returned estimates for every CpG - lets compare CpG's that fit w/ lmeR with Step1B
+* maybe just look at significant ones?
+
+
+## Multiple Testing Adjustment
+
+
+lmeR w/bobyqa optimization
+```{r}
+# keep CpGs w/ no singular fits
+keep <- lmeR_bobyqa_results$is_singular %in% FALSE & !is.na(res$p_slope)
+
+# Benjamini-Hochberg FDR (most common for EWAS)
+res$q_slope <- NA_real_
+res$q_slope[ok] <- p.adjust(res$p_slope[ok], method = "BH")
+```
+
+
+
 
 
 
