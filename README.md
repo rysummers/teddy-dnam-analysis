@@ -11,23 +11,20 @@ The primary objectives are:
    - Fit longitudinal models to identify CpGs with non-zero slopes.
    - Quantify within- and between-subject variability in methylation change.
 
-3. **Evaluate multi-site variability**  
-   - Compare DNAm trajectories across multiple TEDDY study sites.
-   - Assess site-level heterogeneity.
-
-4. **Compare genetic and environmental models**  
+3. **Compare genetic and environmental models**  
    - Fit and compare models incorporating:
      - genetic risk measures
      - environmental exposure variables
    - Evaluate which factors explain variation in baseline DNAm and longitudinal change.
 
-5. **Identify exposure covariates associated with methylation change**  
-   - Examine exposure–time interactions.
+4. **Identify exposure covariates associated with methylation change**  
    - Identify exposures that modify the rate of DNAm change over time.
   
-6. **Evaluate non-linear time trends for specific CpG sites (may be too computationally expensive or difficult to interpret)**  
+5. **Evaluate non-linear time trends for specific CpG sites (may be too computationally expensive or difficult to interpret)**  
   - Compare linear vs non-linear age functions (quadratic terms, piecewise) to capture early-life curvatures in DNAm trajectories.
-  - Identify CpGs with evidence of non-linearity (AIC/LRT or cross-validation) and summarize the type of change (rapid infancy change, developmental windows)
+
+6. **Cluster CpGs**
+   - Use unsupervised ML methods to cluster CpGs based on similarity of methylation patterns across samples.
   
 ## Study background 
 
