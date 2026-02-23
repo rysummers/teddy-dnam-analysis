@@ -21,7 +21,7 @@ mamba activate myenv
 data_dir="/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis"
 
 pheno="${data_dir}/pheno.csv"
-matrix_qs2="${data_dir}/matrix.filt.qs2"
+matrix_qs2="${data_dir}/matrix.clean.qs2" # matrix.filt.qs2
 out_csv="${data_dir}/results/lmeR_results.csv"
 r_script="${data_dir}/run_lmeR_model.R"
 

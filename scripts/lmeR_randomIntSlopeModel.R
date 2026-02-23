@@ -23,9 +23,8 @@
 
 # Updated 20260211:
 # - Replaced nlme::lme() with lme4::lmer():
-#     * Faster and more memory-efficient for large-scale EWAS
 #     * More robust handling of near-singular random-effects structures
-#     * Sparse matrix backend improves scalability
+#     * Employs sparse matricies that improves computational efficiency and numerical stability
 #
 # - Optional support for lmerTest:
 #     * Provides Satterthwaite degrees of freedom

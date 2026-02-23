@@ -53,7 +53,7 @@ cpg_report <- function(
     pheno, # phenotype data set
     anno, # annotation dataset - 850k
     pheno_id = "rgName", # column in pheno file that matches matrix columns
-    outlier_method = c("iqr","z"), # outlier calculation
+    outlier_method = c("iqr","z","mad"), # outlier calculation
     z_thresh = 3, # number of deviations away from mean for z-test 
     DNAm_values = c("M", "beta")  # return M- or beta-values
     ) 
@@ -93,21 +93,42 @@ cpg_report <- function(
   df$CpG_value <- vals[keep]
   
   # dentify outliers 
+  # identify outliers 
   x <- df$CpG_value
+  
   if (outlier_method == "iqr") {
-    q1 <- quantile(x, 0.25, na.rm = T)
-    q3 <- quantile(x, 0.75, na.rm = T)
+    q1 <- quantile(x, 0.25, na.rm = TRUE)
+    q3 <- quantile(x, 0.75, na.rm = TRUE)
     iqr <- q3 - q1
     lo <- q1 - 1.5 * iqr
     hi <- q3 + 1.5 * iqr
     df$is_outlier <- x < lo | x > hi
     df$outlier_score <- NA_real_
+    
     outlier_rule <- list(method="iqr", lo=lo, hi=hi, q1=q1, q3=q3, iqr=iqr)
-  } else {
-    z <- (x - mean(x, na.rm = T)) / sd(x, na.rm = T)
+    
+  } else if (outlier_method == "z") {
+    z <- (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
     df$is_outlier <- abs(z) >= z_thresh
     df$outlier_score <- z
+    
     outlier_rule <- list(method="z", z_thresh=z_thresh)
+    
+  } else if (outlier_method == "mad") {
+    med <- median(x, na.rm = TRUE)
+    mad_val <- mad(x, constant = 1.4826, na.rm = TRUE)
+    
+    # prevent divide-by-zero
+    if (mad_val == 0 || is.na(mad_val)) {
+      df$is_outlier <- FALSE
+      df$outlier_score <- NA_real_
+    } else {
+      zMAD <- (x - med) / mad_val
+      df$is_outlier <- abs(zMAD) >= z_thresh
+      df$outlier_score <- zMAD
+    }
+    
+    outlier_rule <- list(method="mad", median=med, mad=mad_val, z_thresh=z_thresh)
   }
   
   # annotation  
