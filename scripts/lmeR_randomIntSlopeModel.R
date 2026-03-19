@@ -81,7 +81,7 @@ mod_function_lmer <- function(
     id_var,
     age_var,
     covs = NULL,
-    return_blups = TRUE,
+    return_blups = FALSE, # FALSE=int only; TRUE=with random slope
     use_lmerTest = TRUE, # if TRUE -> Satterthwaite p-values
     REML = TRUE,
     control = NULL,

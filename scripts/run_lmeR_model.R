@@ -71,9 +71,9 @@ fit_cpg <- function(probe) {
     age_var = "age_yrs",   
     covs = c("gender", "cc", "CaseControl", "new_Bcell", "new_CD4T", 
              "new_CD8T", "new_Mono", "new_NK"),    
-    return_blups = TRUE, # keep FALSE for speed
+    return_blups = F, # keep FALSE for intercept only modelling
     control = ctrl,
-    random_slope = "age_yrs" # references the age by days variable
+    random_slope = 1 # references the age by days variable
   )}
 
 # set number of cores

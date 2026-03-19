@@ -67,6 +67,7 @@ library(variancePartition)
 library(lmerTest)
 library(future.apply)
 library(data.table)
+library(splines)
 # CpG Script
 source("/Users/ryan_summers/GitHub/teddy-dnam-analysis/scripts/CpG_Report.R")
 ```
@@ -190,7 +191,8 @@ qsave(pheno_filt_ct, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/proces
 
 ```{r}
 # load in original pheno file 
-pheno_filt_ct_unscaled <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno_filt_ct.qs", nthreads = 6)
+pheno_filt_ct_unscaled <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno_filt_ct.qs", 
+                                nthreads = 6)
 
 # pheno_filt_ct_unscaled <- read.csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno.csv",header=T)
 ```
@@ -225,6 +227,29 @@ pheno_filt_ct_scaled <- pheno_filt_ct_scaled %>%
 ```
 
 
+Environmental and other phenotype variables
+```{r}
+# load in second pheno metadata
+pheno2 <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/subject_pheno_204.csv")
+
+pheno2 <- pheno2 %>% 
+  mutate(across(c(maskid), as.factor))
+```
+```{r}
+# merge pheno type datasets
+pheno_complete <- dplyr::left_join(
+  pheno_filt_ct_unscaled,
+  pheno2,
+  by = "maskid")
+
+# clean up duplicate columns
+pheno_complete <- pheno_complete %>%
+  select(-ends_with(".y")) %>%
+  rename_with(~ gsub("\\.x$", "", .x), ends_with(".x"))
+```
+
+
+
 ## Exploratory Data Analysis (EDA)
 
 Methylation Values to Beta function
@@ -255,7 +280,7 @@ unique(pheno_filt_ct_unscaled$Array)
 ```
 
 ```{r}
-# number of patients per clinical site
+# number of patients per clinical site ≈73.5% europe
 cc_distn <- pheno_filt_ct_unscaled %>% 
   group_by(cc) %>% 
   summarize(counts = n()) %>%
@@ -263,7 +288,6 @@ cc_distn <- pheno_filt_ct_unscaled %>%
 
 cc_distn
 
-cc_distn %>% 
 ```
 
 
@@ -273,6 +297,126 @@ pheno_filt_ct_unscaled %>%
   ungroup() %>% 
   miss_var_summary()
 
+```
+
+```{r}
+# determine number of subjects within age brackets
+pheno_filt_ct_unscaled %>%
+  mutate(age_group = cut(age_yrs, 
+                         breaks = c(0,1,2,3,4,5,6,7), 
+                         include.lowest = TRUE)) %>%
+  group_by(age_group) %>%
+  summarise(n_subjects = n_distinct(maskid)) %>%
+  mutate(`%` = round(n_subjects / sum(n_subjects) * 100,2))
+  
+```
+
+[0,1] = 0 ≤ age ≤ 1
+(1,2] = 1 < age ≤ 2
+
+
+```{r}
+pheno_index <- pheno_complete %>%
+  mutate(
+    age_at_diag = case_endptage / 365.25,
+    time_to_index = abs(age_yrs - age_at_diag)) %>%
+  group_by(maskid) %>%
+  slice_min(time_to_index, with_ties = FALSE) %>%
+  ungroup()
+
+pheno_longitudinal <- pheno_filt_ct_unscaled %>%
+  group_by(maskid, CaseControl) %>%
+  summarise(
+    n_visits = n(),
+    min_age = min(age_yrs, na.rm = TRUE),
+    max_age = max(age_yrs, na.rm = TRUE),
+    followup_years = max_age - min_age,
+    .groups = "drop")
+
+pheno_subject <- pheno_index %>%
+  left_join(pheno_longitudinal, by = "maskid")
+
+pheno_subject$dr34 <- factor(pheno_subject$dr34)
+```
+
+### Table 1 Study Characterisitcs
+```{r}
+tbl1 <- pheno_subject %>%
+  mutate(age_at_diag = case_endptage/365.25,
+         race = factor(
+           na_if(race_ethnicity, 5),
+           levels = c(1, 2, 3, 4),
+           labels = c("Hispanic (all races)", "NHW", "AA", "Other")),
+         fdr_3level = factor(fdr_3level, levels = c("none", "dadsib", "mom"),
+                             labels = c("None", "Dad", "Mom")),
+         dr34 = case_when(
+           is.na(dr34) ~ NA_character_,
+           dr34 == 0 ~ "No",
+           dr34 == 1 ~ "Yes",
+           TRUE ~ NA_character_) |> factor(levels = c("No", "Yes"))) %>% 
+  
+  tbl_summary(
+    by = CaseControl.x,
+    include = c(age_at_diag, n_visits, followup_years, dr34, fdr_3level,
+                gender, race, cc),
+    type = list(
+      all_continuous() ~ "continuous2",
+      c(dr34, fdr_3level, gender, race, cc) ~ "categorical"),
+    statistic = list(
+      all_continuous() ~ c(
+        "{mean} ({sd})",
+        "{median} ({p25}, {p75})",
+        "{min} - {max}"),
+      all_categorical() ~ "{n} ({p}%)"),
+    
+    digits = all_continuous() ~ 1,
+    missing = "ifany",
+    missing_text = "NA",
+    missing_stat = "{N_miss} ({p_miss}%)",
+    
+    # change variable names
+    label = list(
+      gender ~ "Gender",
+      race ~ "Race/Ethnicity",
+      dr34 ~ "HLA-DR3/DR4",
+      fdr_3level ~ "First-Degree Relative",
+      age_at_diag  ~ "Age at Diagnosis",
+      cc ~ "Clinical Site",
+      n_visits ~ "Visits per subject",
+      followup_years ~ "Follow-up duration (yrs)"
+      )) %>% 
+
+  add_overall() %>%
+  bold_labels() %>% 
+  italicize_levels() %>% 
+  add_n() %>% 
+  # modify_spanning_header(
+  #   c("stat_1", "stat_2") ~ "****") %>%
+  modify_footnote_header(
+    footnote = "Cases and controls were matched on age, sex, and clinical site 
+    at the index timepoint; therefore, these characteristics are presented for
+    the cohort overall rather than contrasted by case-control status",
+    columns = all_stat_cols(),
+    replace = FALSE) %>% 
+  
+  as_gt() %>%
+  tab_header(
+    title = "Table 1. Characteristics of the TEDDY Study Cohort") %>% 
+  gt::fmt_markdown(columns = everything()) %>% 
+  gt::fmt_number(
+    columns = dplyr::starts_with("p.value"),
+    decimals = 2) %>% 
+  tab_options(
+    table.font.size = "small",
+    heading.align = "left",
+    table.width = pct(75),
+    data_row.padding = px(3),
+    table.border.top.width = px(2),
+    table.border.bottom.width = px(2))
+
+
+tbl1
+gt::gtsave(tbl1, "/Users/ryan_summers/Desktop/table1.html")
 ```
 
 
@@ -291,23 +435,23 @@ mnts_per_id %>%
 hist(mnts_per_id$n_measurements, breaks = 12, freq = FALSE)
 ```
 
+Number of observations for each participant
 ```{r}
 # determine number of subjects that would give "stable" estimates
-subj <- pheno_filt_ct_scaled %>%
+subj <- pheno_filt_ct_unscaled %>%
   group_by(maskid) %>%
   summarise(
     n_obs = n(),
     n_age_unique = n_distinct(sample_agedys), 
     .groups = "drop")
 
-round(c(
-  n_subjects = nrow(subj),
-  n_subjects_slope_ok = sum(subj$n_age_unique >= 2),
-  n_subjects_slope_better = sum(subj$n_age_unique >= 3),
-  pct_slope_ok = mean(subj$n_age_unique >= 2),
-  pct_slope_better = mean(subj$n_age_unique >= 3)), 3)
-
-unique(lme_results$error_message)
+# cumulative percentages (e.g. % more than 3 measurements=70.1%)
+subj %>%
+  reframe(
+    threshold = 1:max(n_obs),
+    `<=== % gt` = sapply(threshold, function(k) {
+      mean(n_obs > k) * 100
+      }))
 
 ```
 
@@ -473,18 +617,18 @@ qsave(outliers, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/M
 
 ```{r}
 # load outliers identified by MAD dataset
-mad_outliers <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/MAD_outliers.qs2",
-                      nthreads = 6)
+mad_outliers <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/MAD_outliers.qs2",nthreads = 6)
 
 nrow(mad_outliers)/1112858208
 ```
 
+1.25% (~13.9M) of total observations were flagged as outliers
 
 ### M-matrix w/out outliers
 ```{r}
 # M-matrix with MAD outliers removed
 matrix.clean <- matrix.filt
-matrix.clean[outlier_mat] <- NA
+matrix.clean[outlier_mat] <- NA # setting only specific samples within each Cpg as NA
 
 qs_save(matrix.clean, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/matrix.clean.qs2", nthreads = 6)
 ```
@@ -493,8 +637,6 @@ qs_save(matrix.clean, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/proce
 # load clean matrix
 matrix.clean <- qs_read("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/matrix.clean.qs2", nthreads = 6)
 ```
-
-
 
 
 ## Sample Modeling Runs
@@ -556,7 +698,6 @@ pheno_ordered <- pheno_filt_ct_unscaled[match(colnames(matrix.sample),
                                      pheno_filt_ct_unscaled$rgName), ]
 stopifnot(all(!is.na(pheno_ordered$rgName)))
 ```
-
 
 
 ### lmeR Run
@@ -625,193 +766,561 @@ Eigenvalue:
 Interpretation:
 There is strong subject-to-subject variability in one direction (intercept), and almost none in the other (slope-related direction).
 
-* Eigenvalues > 0 → matrix is positive definite (good)
-* Very small eigenvalues → one direction has almost no variance
-*	≈ 0 eigenvalue → model is near-singular
-	
+* Eigenvalues > 0 -> matrix is positive definite (good)
+* Very small eigenvalues -> one direction has almost no variance
+*	≈ 0 eigenvalue -> model is near-singular
 
 ```{r}
-# form <- ~ age_yrs_c + gender + cc + new_Bcell + new_CD4T + new_CD8T + 
-# new_Mono + new_NK + (1 | maskid)
-fit_cpg <- function(probe) {
-  mod_function(
-    probe = probe,
-    matrix = matrix.filt,
-    pheno = pheno_filt_ct,
-    sample_var = "rgName",    
-    id_var = "maskid",           
-    age_var = "age_yrs_c",   
-    covs = c("gender", "cc", "new_Bcell", "new_CD4T", 
-             "new_CD8T", "new_Mono", "new_NK"),    
-    return_blups = FALSE # keep FALSE for speed
-  )}
-
+mod_function_lmer_traj <- function(
+    probe,
+    matrix,
+    pheno,
+    sample_var,
+    id_var,
+    age_var,
+    covs = NULL,
+    age_mode = c("linear", "ns"),
+    age_df = 3,
+    return_predictions = T,
+    pred_age_grid = NULL,
+    use_lmerTest = F,
+    REML = F,
+    control = NULL,
+    random_slope = F) 
+{
+  
+  age_mode <- match.arg(age_mode)
+  
+  # ---- checks ----
+  if (!is.character(probe) || length(probe) != 1) {
+    return(data.frame(
+      CpG = NA_character_,
+      fit_status = "error",
+      error_message = "Probe must be a single string",
+      stringsAsFactors = F))
+  }
+  
+  if (!(probe %in% rownames(matrix))) {
+    return(data.frame(
+      CpG = probe,
+      fit_status = "error",
+      error_message = "Probe not found in matrix",
+      stringsAsFactors = F))
+  }
+  
+  # ---- assemble data ----
+  cpg <- as.numeric(matrix[probe, ])
+  names(cpg) <- colnames(matrix)
+  
+  sid_chr <- as.character(pheno[[sample_var]])
+  missing_sids <- setdiff(unique(sid_chr), colnames(matrix))
+  if (length(missing_sids) > 0) {
+    return(data.frame(
+      CpG = probe,
+      fit_status = "error",
+      error_message = paste0("Sample IDs in pheno not found in matrix: ", 
+                             length(missing_sids)), stringsAsFactors = F))
+  }
+  
+  pheno$CpG <- cpg[sid_chr]
+  
+  needed <- c("CpG", id_var, age_var, covs)
+  needed <- needed[!is.na(needed)]
+  forAnalysis <- pheno[stats::complete.cases(pheno[, needed, drop = F]), ,
+                       drop = F]
+  
+  if (nrow(forAnalysis) < 5) {
+    return(data.frame(
+      CpG = probe,
+      fit_status = "error",
+      error_message = "Too few complete observations after filtering",
+      stringsAsFactors = F))
+  }
+  
+  forAnalysis[[id_var]] <- as.factor(forAnalysis[[id_var]])
+  
+  # ---- build age term ----
+  age_term <- switch(
+    age_mode,
+    linear = age_var,
+    ns = paste0("splines::ns(", age_var, ", df = ", age_df, ")"))
+  
+  fixed_terms <- c(age_term, covs)
+  fixed_terms <- fixed_terms[nzchar(fixed_terms)]
+  fixed_rhs <- paste(fixed_terms, collapse = " + ")
+  
+  rand_term <- if (isTRUE(random_slope)) {
+    paste0("(", age_var, " | ", id_var, ")")
+  } else {
+    paste0("(1 | ", id_var, ")")
+  }
+  
+  form <- stats::as.formula(
+    paste0("CpG ~ ", fixed_rhs, " + ", rand_term))
+  
+  fit_status <- "ok"
+  warn_message <- NA_character_
+  error_message <- NA_character_
+  
+  fit_fun <- function() {
+    if (use_lmerTest && requireNamespace("lmerTest", quietly = TRUE)) {
+      lmerTest::lmer(form, data = forAnalysis, REML = REML, control = control)
+    } else {
+      lme4::lmer(form, data = forAnalysis, REML = REML, control = control)
+    }
+  }
+  
+  model <- tryCatch(
+    withCallingHandlers(
+      fit_fun(),
+      warning = function(w) {
+        if (identical(fit_status, "ok")) {
+          fit_status <<- "warning"
+          warn_message <<- conditionMessage(w)
+        }
+        invokeRestart("muffleWarning")
+      }),
+    error = function(e) {
+      fit_status <<- "error"
+      error_message <<- conditionMessage(e)
+      return(NULL)
+    })
+  
+  if (is.null(model)) {
+    return(data.frame(
+      CpG = probe,
+      fit_status = fit_status,
+      warn_message = warn_message,
+      error_message = error_message,
+      stringsAsFactors = F))
+  }
+  
+  # ---- diagnostics ----
+  out <- data.frame(
+    CpG = probe,
+    fit_status = fit_status,
+    warn_message = warn_message,
+    error_message = error_message,
+    age_mode = age_mode,
+    age_df = ifelse(age_mode == "ns", age_df, NA),
+    random_slope = random_slope,
+    model_call = paste(deparse(stats::formula(model)), collapse = " "),
+    nObs = stats::nobs(model),
+    AIC = stats::AIC(model),
+    BIC = stats::BIC(model),
+    logLik = as.numeric(stats::logLik(model)),
+    neg2LL = -2 * as.numeric(stats::logLik(model)),
+    is_singular = lme4::isSingular(model, tol = 1e-5),
+    stringsAsFactors = F)
+  
+  # ---- optional trajectory predictions ----
+  if (isTRUE(return_predictions)) {
+    
+    if (is.null(pred_age_grid)) {
+      pred_age_grid <- seq(
+        min(forAnalysis[[age_var]], na.rm = T),
+        max(forAnalysis[[age_var]], na.rm = T),
+        length.out = 10)
+    }
+    
+    # hold nuisance covariates fixed for population trajectory
+    pred_df <- data.frame(age_tmp = pred_age_grid)
+    names(pred_df)[1] <- age_var
+    
+    for (cv in covs) {
+      x <- forAnalysis[[cv]]
+      if (is.factor(x)) {
+        pred_df[[cv]] <- factor(levels(x)[1], levels = levels(x))
+      } else {
+        pred_df[[cv]] <- stats::median(x, na.rm = TRUE)
+      }
+    }
+    
+    # include grouping column for predict; allow population-level prediction
+    pred_df[[id_var]] <- forAnalysis[[id_var]][1]
+    
+    preds <- tryCatch(
+      stats::predict(model, newdata = pred_df, re.form = NA, allow.new.levels = TRUE),
+      error = function(e) rep(NA_real_, length(pred_age_grid)))
+    
+    pred_names <- paste0("pred_age_", format(round(pred_age_grid, 3), trim = TRUE))
+    pred_row <- as.data.frame(t(preds))
+    names(pred_row) <- pred_names
+    
+    out <- cbind(out, pred_row)
+  }
+  
+  out
+}
 ```
 
-Run a small parallel test first	
 
 ```{r}
+compare_age_models_one_cpg <- function(
+    probe,
+    matrix,
+    pheno,
+    sample_var,
+    id_var,
+    age_var,
+    covs = NULL,
+    control = NULL,
+    pred_age_grid = NULL,
+    random_slope = FALSE) 
+  {
+  
+  fit_model <- function(age_mode, age_df = NULL) {
+    mod_function_lmer_traj(
+      probe = probe,
+      matrix = matrix,
+      pheno = pheno,
+      sample_var = sample_var,
+      id_var = id_var,
+      age_var = age_var,
+      covs = covs,
+      age_mode = age_mode,
+      age_df = ifelse(is.null(age_df), 3, age_df),
+      return_predictions = TRUE,
+      pred_age_grid = pred_age_grid,
+      REML = FALSE,
+      control = control,
+      random_slope = random_slope)
+    }
+  
+  # fit summary rows
+  res_linear <- fit_model("linear")
+  res_ns3    <- fit_model("ns", 3)
+  res_ns4    <- fit_model("ns", 4)
+  
+  # refit actual model objects for LRT
+  build_data <- function() {
+    cpg <- as.numeric(matrix[probe, ])
+    names(cpg) <- colnames(matrix)
+    ph <- pheno
+    ph$CpG <- cpg[as.character(ph[[sample_var]])]
+    needed <- c("CpG", id_var, age_var, covs)
+    needed <- needed[!is.na(needed)]
+    ph <- ph[stats::complete.cases(ph[, needed, drop = FALSE]), , drop = FALSE]
+    ph[[id_var]] <- as.factor(ph[[id_var]])
+    ph
+  }
+  
+  dat <- build_data()
+  
+  rand_term <- if (random_slope) {
+    paste0("(", age_var, " | ", id_var, ")")
+  } else {
+    paste0("(1 | ", id_var, ")")
+  }
+  
+  cov_txt <- if (length(covs)) paste("+", paste(covs, collapse = " + ")) else ""
+  
+  f_linear <- stats::as.formula(
+    paste0("CpG ~ ", age_var, " ", cov_txt, " + ", rand_term))
+  
+  f_ns3 <- stats::as.formula(
+    paste0("CpG ~ splines::ns(", age_var, ", df = 3) ", cov_txt, " + ", rand_term))
+  
+  f_ns4 <- stats::as.formula(
+    paste0("CpG ~ splines::ns(", age_var, ", df = 4) ", cov_txt, " + ", rand_term))
+  
+  m_linear <- tryCatch(lme4::lmer(f_linear, data = dat, REML = FALSE, 
+                                  control = control), error = function(e) NULL)
+  m_ns3    <- tryCatch(lme4::lmer(f_ns3,    data = dat, REML = FALSE, 
+                                  control = control), error = function(e) NULL)
+  m_ns4    <- tryCatch(lme4::lmer(f_ns4,    data = dat, REML = FALSE, 
+                                  control = control), error = function(e) NULL)
+  
+  lrt_linear_vs_ns3 <- NA
+  lrt_ns3_vs_ns4 <- NA
+  
+  if (!is.null(m_linear) && !is.null(m_ns3)) {
+    lrt_linear_vs_ns3 <- tryCatch(anova(m_linear, m_ns3)$`Pr(>Chisq)`[2],
+                                  error = function(e) NA_real_)
+  }
+  
+  if (!is.null(m_ns3) && !is.null(m_ns4)) {
+    lrt_ns3_vs_ns4 <- tryCatch(anova(m_ns3, m_ns4)$`Pr(>Chisq)`[2], 
+                               error = function(e) NA_real_)
+  }
+  
+  bind_rows <- function(...) {
+    data.table::rbindlist(list(...), fill = TRUE)
+  }
+  
+  out <- bind_rows(res_linear, res_ns3, res_ns4)
+  out$lrt_linear_vs_ns3 <- lrt_linear_vs_ns3
+  out$lrt_ns3_vs_ns4 <- lrt_ns3_vs_ns4
+  out
+}
+```
+
+
+```{r}
+t0 <- Sys.time()
+
+ctrl <- lme4::lmerControl(
+  optimizer = "bobyqa",
+  optCtrl = list(maxfun = 2e5))
+
+set.seed(2522)
+benchmark_probes <- sample(rownames(matrix.clean), 1000)
+
+# grid based on age in years
+age_grid <- c(
+  0.25, 0.5, 0.75, 1.0,
+  1.25, 1.5, 1.75, 2.0,
+  2.5, 3.5, 5.0, 6.0)
+
+age_grid <- seq(
+  min(pheno_filt_ct$age_yrs, na.rm = TRUE),
+  max(pheno_filt_ct$age_yrs, na.rm = TRUE),
+  length.out = 12)
+
+pheno_complete <- pheno_complete %>% 
+  mutate(across(c(maskid, cc, gender, CaseControl), as.factor))
+
+
+# set number of cores
 future::plan(future::multicore, workers = 6)
-future::plan()
 options(future.globals.maxSize = 20 * 1024^3)  # 20 GiBb
 
-system.time({
-  test_probes <- rownames(matrix.sample) # dim = 790944x1407
-  test_res <- future_lapply(test_probes, fit_cpg)
-  test_res <- data.table::rbindlist(test_res, fill = TRUE)
+benchmark_res <- future_lapply(benchmark_probes, function(p) {
+  compare_age_models_one_cpg(
+    probe = p,
+    matrix = matrix.clean,
+    pheno = pheno_filt_ct_unscaled,
+    sample_var = "rgName",
+    id_var = "maskid",
+    age_var = "age_yrs",
+    covs = c("gender", "cc", "CaseControl", "new_Bcell", "new_CD4T",
+             "new_CD8T", "new_Mono", "new_NK"),
+    control = ctrl,
+    pred_age_grid = age_grid,
+    random_slope = T)
   })
 
-# save to csv
-write.csv(test_res, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/test_res.csv")
+benchmark_res <- data.table::rbindlist(benchmark_res, fill = TRUE)
+#qsave(benchmark_res, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/benchmark_res.qs")
 
-# load csv
-test_res <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/test_res.csv")
-```
-    user   system  elapsed 
-8063.489   73.480 8139.559 - 2.3hrs 
-
-Estimated time to run all CpGs on my system:
-20*8139.559 = 162791.2sec ≈ 2,714min ≈ 45.2hrs ≈ 2days
-
-
-```{r}
-# extract errors from test run
-error_cpgs <- test_res[test_res$fit_status == "error", "CpG"]$CpG
-
-tt[error_cpgs,]
-```
-
-
-
-## DREAM Modeling Analysis
-
-```{r}
-# now fit new summarized experiment object w/ filtered CpGs
-pheno_ordered <- pheno_filt_ct[match(colnames(matrix.filt), pheno_filt_ct$rgName), ]
-stopifnot(all(!is.na(pheno_ordered$rgName)))
-
-# build the SummarizedExperiment
-se.filt <- SummarizedExperiment(
-  assays = list(Mvalue = matrix.sample), #[1:39548,]
-  colData = as.data.frame(pheno_ordered))
-
-```
-
-
-```{r}
-# formula
-form <- ~ age_yrs + gender + cc + CaseControl + new_Bcell + new_CD4T + new_CD8T + new_Mono + new_NK + (age_yrs | maskid)
+t1 <- Sys.time()
+message("lmeR runtime: ", 
+        round(as.numeric(difftime(t1, t0, units = "mins")), 2), 
+        " minutes")
 ```
 
 ```{r}
-# set up parallelization
-n.cores <- parallel::detectCores() - 1
-param <- SnowParam(5, type = "SOCK", progressbar = T)  
-param <- MulticoreParam(workers = 5, progressbar = T)
+benchmark_summary <- benchmark_res %>%
+  group_by(age_mode, age_df) %>%
+  summarise(
+    n = n(),
+    mean_AIC = mean(AIC, na.rm = TRUE),
+    mean_BIC = mean(BIC, na.rm = TRUE),
+    prop_warning = mean(fit_status == "warning", na.rm = TRUE),
+    prop_error = mean(fit_status == "error", na.rm = TRUE),
+    prop_singular = mean(is_singular, na.rm = TRUE),
+    .groups = "drop")
+
+print(benchmark_summary)
 ```
 
 ```{r}
-# fit the model - uses REML by default
-system.time({
-  dream.model3 <- suppressWarnings(
-    dream(exprObj = assay(se.filt, "Mvalue"), 
-          formula = form, 
-          data = colData(se.filt), 
-          ddf = "Satterthwaite", 
-          BPPARAM = param))
-  })
+per_cpg_comp <- benchmark_res %>%
+  select(CpG, age_mode, age_df, AIC, BIC, lrt_linear_vs_ns3, lrt_ns3_vs_ns4) %>%
+  distinct()
 
-qsave(dream.model3, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream.model3.qs", preset = "fast", nthreads = 6)
-```
-user   system  elapsed 
-39.413   10.947 1176.774 - 19.6min
+# just one row per CpG for the LRT summaries
+lrt_summary <- per_cpg_comp %>%
+  group_by(CpG) %>%
+  summarise(
+    lrt_linear_vs_ns3 = max(lrt_linear_vs_ns3, na.rm = TRUE),
+    lrt_ns3_vs_ns4 = max(lrt_ns3_vs_ns4, na.rm = TRUE),
+    .groups = "drop") %>%
+  summarise(
+    prop_ns3_better_than_linear_p_lt_0_05 = mean(lrt_linear_vs_ns3 < 0.05, na.rm = TRUE),
+    prop_ns4_better_than_ns3_p_lt_0_05 = mean(lrt_ns3_vs_ns4 < 0.05, na.rm = TRUE))
 
-Est full:
-≈ 392min ≈ 6.5hrs - 6.9x faster than custom function
-
-
-```{r}
-dream_test3 <- topTable(dream.model3, number = Inf)
-
-# number of significant CpGs based on adjusted p-value
-nrow(subset(dream_test3, adj.P.Val < 0.05))
-nrow(subset(dream_test3, adj.P.Val < 0.05)) / nrow(matrix.sample)
-```
-
-
-
-
-Alpine ≈ 319.96min ≈ 5.3hrs
-```{r}
-# load Alpine dream model
-dream.model <- qs_read("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream.model.qs2",
-        nthreads = 6)
+print(lrt_summary)
 ```
 
 ```{r}
-# load in dream results
-dream_results <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream_res.qs", nthreads = 6)
+# AIC percentage
+aic_pct <- per_cpg_comp %>%
+  mutate(age_mode_df = ifelse(age_mode == "linear", 
+                         "linear", 
+                         paste0(age_mode, "_", age_df))) %>% 
+  select(CpG, age_mode_df, AIC) %>%
+  distinct() %>%
+  pivot_wider(names_from = age_mode_df, values_from = AIC) %>%
+  summarise(pct = mean(ns_4 < linear, na.rm = TRUE) * 100) %>%
+  pull(pct)
+
+# AIC percentage
+aic_pct2 <- benchmark_res %>%
+    mutate(age_mode_df = ifelse(age_mode == "linear", 
+                         "linear", 
+                         paste0(age_mode, "_", age_df))) %>% 
+  select(CpG, age_mode_df, AIC) %>%
+  distinct() %>%
+  pivot_wider(names_from = age_mode_df, values_from = AIC) %>%
+  summarise(pct = mean(ns_3 < linear, na.rm = TRUE) * 100) %>%
+  pull(pct)
+
+# LRT - will always be better - more complexity better model fit
+
+aic_pct
+aic_pct2
 ```
-
-
-## Dream Model Diagnostics
 
 ```{r}
-# load in DREAM results
-#dream_results <- read.csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream_res.csv")
-dream.model <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream.model.qs", 
-                       nthreads = 6)
+# results should be in long format with at least:
+# CpG, model, AIC
+# where model is something like "linear" and "ns3"
+
+aic_change_summary <- benchmark_res %>%
+    mutate(age_mode_df = ifelse(age_mode == "linear", 
+                         "linear", 
+                         paste0(age_mode, "_", age_df))) %>% 
+  select(CpG, age_mode_df, AIC) %>%
+  distinct() %>%
+  pivot_wider(names_from = age_mode_df, values_from = AIC) %>%
+  mutate(
+    delta_AIC = linear - ns_3,
+    ns3_better = delta_AIC > 0,
+    ns3_better_2 = delta_AIC > 2,
+    ns3_better_10 = delta_AIC > 10) %>%
+  summarise(
+    n_cpg = n(),
+    pct_ns3_better = mean(ns3_better, na.rm = TRUE) * 100,
+    pct_delta_AIC_gt_2 = mean(ns3_better_2, na.rm = TRUE) * 100,
+    pct_delta_AIC_gt_10 = mean(ns3_better_10, na.rm = TRUE) * 100,
+    mean_delta_AIC = mean(delta_AIC, na.rm = TRUE),
+    median_delta_AIC = median(delta_AIC, na.rm = TRUE),
+    q25_delta_AIC = quantile(delta_AIC, 0.25, na.rm = TRUE),
+    q75_delta_AIC = quantile(delta_AIC, 0.75, na.rm = TRUE),
+    q90_delta_AIC = quantile(delta_AIC, 0.90, na.rm = TRUE),
+    q95_delta_AIC = quantile(delta_AIC, 0.95, na.rm = TRUE),
+    max_delta_AIC = max(delta_AIC, na.rm = TRUE))
+
+print(t(aic_change_summary))
+```
+
+Based on median, for more than half of CpGs, linear is slightly better or essentially equivalent.
+But, a subset of CpGs are strongly nonlinear:
+q90 = 46  
+q95 = 94  
+max = 911
+
+~38% show real improvement of AIC greater than 2
+~22% show strong improvement of AIC greater than 10
+
+So, approximately 
+
+```{r}
+aic_change_tbl <- benchmark_res %>%
+    mutate(age_mode_df = ifelse(age_mode == "linear", 
+                         "linear", 
+                         paste0(age_mode, "_", age_df))) %>% 
+  select(CpG, age_mode_df, AIC) %>%
+  distinct() %>%
+  pivot_wider(names_from = age_mode_df, values_from = AIC) %>%
+  mutate(
+    delta_AIC = linear - ns_3,
+    ns3_better = delta_AIC > 0,
+    ns3_better_2 = delta_AIC > 2,
+    ns3_better_10 = delta_AIC > 10)
+
+head(aic_change_tbl)
 ```
 
 ```{r}
-# use topTable to view results
-dream_results <- topTable(dream.model, number = Inf)
-
-# save by serialization
-qsave(dream_results, "dream_results.qs", nthreads=6)
-
-# write to csv
-write.csv(dream_results, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/dream_results.csv")
-
-# number of significant CpGs after
-nrow(subset(dream_res, adj.P.Val < 0.05))
-
-tt_T1DAge <- topTable(dream.model, coef = "diseaseCase:age_years",
-         number = Inf, sort.by = "B") 
-
-sig_tt <- topTable(dream.model, coef = "diseaseCase:age_years",
-         number = Inf, sort.by = "B") 
+hist(
+  aic_change_tbl$delta_AIC,
+  breaks = 100,
+  main = "Delta AIC: linear - ns3",
+  xlab = "Delta AIC")
+abline(v = c(0, 2, 10), lty = 2)
 ```
-
 
 ```{r}
-all_cpgs    <- rownames(matrix.filt)
-modeled_cpgs <- dream_results$X
+traj_cols <- grep("^pred_age_", names(benchmark_res), value = TRUE)
 
-# how many CpGs were dropped from model
-length(setdiff(all_cpgs, modeled_cpgs))
-
-# determine CpGs dropped from dream model
-dropped <- setdiff(all_cpgs, modeled_cpgs)
-
-# check variability of dropped CpGs
-summary(apply(matrix.filt[dropped, ], 1, var))
+traj_mat <- as.matrix(benchmark_res[, ..traj_cols])
+rownames(traj_mat) <- benchmark_res$CpG
 
 ```
-
 
 ```{r}
-# number of significant CpGs based on adjusted p-value
-nrow(subset(dream_results, adj.P.Val < 0.05))
-nrow(subset(dream_results, adj.P.Val < 0.05)) / nrow(matrix.filt)
+# split models
+dt_linear <- benchmark_res[age_mode == "linear"]
+dt_ns3    <- benchmark_res[age_mode == "ns" & age_df == 3]
 
+# ensure correct order
+setkey(dt_linear, CpG)
+setkey(dt_ns3, CpG)
+
+all(dt_linear$CpG == dt_ns3$CpG)
 ```
+
+```{r}
+# create matrices
+traj_linear <- as.matrix(dt_linear[, ..traj_cols])
+traj_ns3    <- as.matrix(dt_ns3[, ..traj_cols])
+```
+
+```{r}
+cor(as.vector(dist(traj_linear)), as.vector(dist(traj_ns3)))
+```
+
+Main takeaways:
+
+Group 1 (~50%)
+	* mostly linear
+	* spline ≈ linear
+
+Group 2 (~35%)
+	* moderately nonlinear
+	* pline changes curvature but not drastically
+
+Group 3 (~15–20%)
+	* strongly nonlinear
+	* spline fundamentally changes trajectory
+	
+Quick and dirty clustering
+```{r}
+scale_rows <- function(x) {
+  t(scale(t(x), center = TRUE, scale = TRUE))
+}
+
+traj_linear_scaled <- scale_rows(traj_linear)
+traj_ns3_scaled <- scale_rows(traj_ns3)
+
+# handle any constant rows (sd = 0)
+traj_linear_scaled[is.na(traj_linear_scaled)] <- 0
+traj_ns3_scaled[is.na(traj_ns3_scaled)] <- 0
+```
+
+```{r}
+km_linear <- kmeans(traj_linear_scaled, centers = 20)
+km_ns3 <- kmeans(traj_ns3_scaled, centers = 20)
+
+library(mclust)
+adjustedRandIndex(km_linear$cluster, km_ns3$cluster)
+```
+
+The Adjusted Rand Index ranges:
+	*	1.0 → identical clustering
+	*	~0.8–1.0 → very similar
+	*	~0.5–0.7 → moderately similar
+	*	~0.2–0.4 → weak similarity
+	*	~0.0 → essentially unrelated
 
 Check how many subjects only have one observation, which can be ill-posed for
 random intercept/slope models
+
 ```{r}
-pheno_filt_ct$maskid <- factor(pheno_filt_ct$maskid)
-table_sizes <- table(pheno_filt_ct$maskid)
+pheno_filt_ct_unscaled$maskid <- factor(pheno_filt_ct_unscaled$maskid)
+table_sizes <- table(pheno_filt_ct_unscaled$maskid)
 summary(table_sizes)
 mean(table_sizes == 1)
 
@@ -902,6 +1411,24 @@ VarCorr(cg25271479.lmer.model)
 * k = 14
 
 Model:
+$$
+Y_i
+= \beta_0
+
++ \beta_{\text{age}}(\text{age}_i)
++ \beta_{\text{gender}}(\text{gender}_i)
++ \beta_{\text{cc}}(\text{CC}_i)
++ \beta_{\text{CaseControl}}(\text{CaseControl}_i)
++ \beta_{\text{B}}(\text{Bcell}_i) \\
++ \beta_{\text{CD4}}(\text{CD4T}_i)
++ \beta_{\text{CD8}}(\text{CD8T}_i)
++ \beta_{\text{Mono}}(\text{Mono}_i)
++ \beta_{\text{NK}}(\text{NK}_i) \\
++ b_{0}
++ b_{1}(\text{age}_i)
++ \varepsilon_i
+$$
+
 $$
 \mathbf y_i \sim N(X_i\beta,\ V_i) \\
 \mathbf y_i = X_i\beta + Z_i b_i + \epsilon_i
@@ -1190,7 +1717,7 @@ cat("lmeR w/bobyqa optimization and MAD outliers removed had ",
 Using the bobyqa optimization and increasing maxfun let the optimizer converge more fully, and for many CpGs the REML estimate for the random-slope variance is on the boundary (≈0), so more fits are flagged as singular. This suggests the random slope is not needed (no heterogeneity) for those CpGs, and AIC-based screening should be used with caution and looked at explicitly.
 
 
-## Multiple Testing Adjustment
+### Multiple Testing Adjustment
 
 ```{r}
 head(lmeR_bobyqa_results)
@@ -1265,7 +1792,23 @@ cat(
   nrow(lmeR_MAD_results[lmeR_MAD_results$q_slope < 0.05, ]),
   "CpGs with a significant slope w/ q-values <0.05\n")
 ```
-* With outliers removed, we retained 9139 more CpGs with a significant slope and wasn't singular
+
+* With outliers removed, we retained 9139 more CpGs after FDR (BH) adjustment with a significant slope and wasn't singular
+
+### Comparison of p-values with βeta values and AIC
+
+Let's discover any relationships with our p-values/βetas/AIC. Looking at these together may reveal patterns about signal strength, practical relevance, and model structure.
+
+With singular fits using BOBYQA optimization
+```{r}
+ggplot(lmeR_bobyqa_results, 
+       aes(x = fixed_slope, y = -log10(p_slope), color = aic)) +
+  geom_point(alpha = 0.25, size = 0.6) +
+  scale_color_viridis_c(name = "AIC") +
+  labs(x = "Fixed age slope (M-value scale)", y = "-log10(p-value)") +
+  theme_classic()
+```
+
 
 
 
