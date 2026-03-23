@@ -146,7 +146,7 @@ mod_function_lmer <- function(
     # substitute age_var w/ 1 if we want intercept only
     paste0("CpG ~ ", form_fixed, " + (", random_slope , " | ", id_var, ")"))
   
-  # ---- fit with clean logging ----
+  # ---- fit with warning/error capture ----
   fit_status <- "ok"
   warn_message <- NA_character_
   error_message <- NA_character_

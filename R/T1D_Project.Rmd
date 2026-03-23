@@ -68,8 +68,16 @@ library(lmerTest)
 library(future.apply)
 library(data.table)
 library(splines)
+<<<<<<< HEAD
 # CpG Script
+=======
+library(naniar)
+
+# CpG Scripts
+>>>>>>> 678fc14 (created new scripts to handle non-linear lmeR model fits to run on Alpine. Updated markdown file to run sample runs to determine if non-linear fits will improve over linear.)
 source("/Users/ryan_summers/GitHub/teddy-dnam-analysis/scripts/CpG_Report.R")
+source("/Users/ryan_summers/GitHub/teddy-dnam-analysis/scripts/lmeR_traj_model.R")
+source("/Users/ryan_summers/GitHub/teddy-dnam-analysis/scripts/lmeR_traj_comparisons.R")
 ```
 
 Scripts for installing multiple packages
@@ -115,12 +123,6 @@ Load data from personal external drive
 # M.matrix <- qread("/Volumes/Storage/Maternal_Protection/data/teddy/TEDDYarrays/preprocessing-dnam/M.matrix.qs", nthreads = 8)
 # 
 # qsave(M.matrix, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/raw/M.matrix.qs", nthreads = 6)
-```
-
-850K Annotation
-```{r}
-# Load DNAm annotation
-load(file="/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/raw/annotation.850K.Rdata")
 ```
 
 
@@ -212,18 +214,49 @@ pheno_filt_ct_unscaled$age_yrs <- pheno_filt_ct_unscaled$sample_agedys / 365.25
 
 
 ```{r}
-# load in pheno scaled file 
-pheno_filt_ct_scaled <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno_scaled.csv")
-```
-
-```{r}
 # convert needed variables to factors
 pheno_filt_ct_unscaled <- pheno_filt_ct_unscaled %>% 
   mutate(across(c(maskid, cc, gender, CaseControl), as.factor))
 
+```
 
-pheno_filt_ct_scaled <- pheno_filt_ct_scaled %>% 
-  mutate(across(c(maskid, cc, gender, CaseControl), as.factor))
+
+Environmental and other phenotype variables
+```{r}
+# load in second pheno metadata
+pheno2 <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/subject_pheno_204.csv")
+
+pheno2 <- pheno2 %>% 
+  mutate(across(c(maskid), as.factor))
+```
+
+
+```{r}
+# merge pheno type datasets
+pheno_complete <- dplyr::left_join(
+  pheno_filt_ct_unscaled,
+  pheno2,
+  by = "maskid")
+
+# clean up duplicate columns
+pheno_complete <- pheno_complete %>%
+  select(-ends_with(".y")) %>%
+  rename_with(~ gsub("\\.x$", "", .x), ends_with(".x"))
+
+# # save to csv
+# write.csv(pheno_complete, file = "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno_complete.csv")
+```
+
+### Pheno Complete
+```{r}
+pheno_complete <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/pheno_complete.csv")
+```
+
+
+## Load 850K Annotation
+```{r}
+# Load DNAm annotation
+load(file="/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/raw/annotation.850K.Rdata")
 ```
 
 
@@ -293,7 +326,7 @@ cc_distn
 
 ```{r}
 # missing value percentages
-pheno_filt_ct_unscaled %>%
+pheno_complete %>%
   ungroup() %>% 
   miss_var_summary()
 
@@ -301,7 +334,11 @@ pheno_filt_ct_unscaled %>%
 
 ```{r}
 # determine number of subjects within age brackets
+<<<<<<< HEAD
 pheno_filt_ct_unscaled %>%
+=======
+pheno_complete %>%
+>>>>>>> 678fc14 (created new scripts to handle non-linear lmeR model fits to run on Alpine. Updated markdown file to run sample runs to determine if non-linear fits will improve over linear.)
   mutate(age_group = cut(age_yrs, 
                          breaks = c(0,1,2,3,4,5,6,7), 
                          include.lowest = TRUE)) %>%
@@ -336,7 +373,17 @@ pheno_longitudinal <- pheno_filt_ct_unscaled %>%
 pheno_subject <- pheno_index %>%
   left_join(pheno_longitudinal, by = "maskid")
 
+<<<<<<< HEAD
 pheno_subject$dr34 <- factor(pheno_subject$dr34)
+=======
+pheno_subject <- pheno_subject %>%
+  mutate(
+    dr34 = case_when(
+      is.na(dr34) ~ NA_character_,
+      dr34 == 0 ~ "No",
+      dr34 == 1 ~ "Yes",
+      TRUE ~ NA_character_) |> factor(levels = c("No", "Yes")))
+>>>>>>> 678fc14 (created new scripts to handle non-linear lmeR model fits to run on Alpine. Updated markdown file to run sample runs to determine if non-linear fits will improve over linear.)
 ```
 
 ### Table 1 Study Characterisitcs
@@ -348,6 +395,7 @@ tbl1 <- pheno_subject %>%
            levels = c(1, 2, 3, 4),
            labels = c("Hispanic (all races)", "NHW", "AA", "Other")),
          fdr_3level = factor(fdr_3level, levels = c("none", "dadsib", "mom"),
+<<<<<<< HEAD
                              labels = c("None", "Dad", "Mom")),
          dr34 = case_when(
            is.na(dr34) ~ NA_character_,
@@ -357,6 +405,12 @@ tbl1 <- pheno_subject %>%
   
   tbl_summary(
     by = CaseControl.x,
+=======
+                       labels = c("None", "Dad", "Mom"))) %>% 
+  
+  tbl_summary(
+    by = CaseControl.y,
+>>>>>>> 678fc14 (created new scripts to handle non-linear lmeR model fits to run on Alpine. Updated markdown file to run sample runs to determine if non-linear fits will improve over linear.)
     include = c(age_at_diag, n_visits, followup_years, dr34, fdr_3level,
                 gender, race, cc),
     type = list(
@@ -422,7 +476,7 @@ gt::gtsave(tbl1, "/Users/ryan_summers/Desktop/table1.html")
 
 ```{r}
 # measurement stats
-pheno_filt_ct_unscaled %>% 
+pheno_complete %>% 
   group_by(maskid) %>%
   summarise(n_measurements = n()) -> mnts_per_id 
 
@@ -438,7 +492,11 @@ hist(mnts_per_id$n_measurements, breaks = 12, freq = FALSE)
 Number of observations for each participant
 ```{r}
 # determine number of subjects that would give "stable" estimates
+<<<<<<< HEAD
 subj <- pheno_filt_ct_unscaled %>%
+=======
+subj <- pheno_complete %>%
+>>>>>>> 678fc14 (created new scripts to handle non-linear lmeR model fits to run on Alpine. Updated markdown file to run sample runs to determine if non-linear fits will improve over linear.)
   group_by(maskid) %>%
   summarise(
     n_obs = n(),
@@ -540,12 +598,14 @@ getSpagPlot <- function(CpG, mvals, pheno, anno) {
     theme(plot.title = element_text(size = 12))
 }
 
+```
 
+```{r}
 
 #plots <- lapply(df$CpG, getSpagPlot, toPlot = toPlot, anno = anno)
-p <- getSpagPlot("cg10631356", 
-                 mvals = matrix.filt, 
-                 pheno = pheno_filt_ct_unscaled, 
+p <- getSpagPlot("cg10767662", 
+                 mvals = matrix.clean, 
+                 pheno = pheno_complete, 
                  anno = anno)
 p
 
@@ -577,7 +637,6 @@ rep$outliers %>% arrange(desc(abs(outlier_score)))
 ```{r}
 sample_outlier_counts <- outliers %>%
   dplyr::count(sample)
-
 
 outliers %>% 
   group_by(CpG) %>% 
@@ -684,8 +743,8 @@ set.seed(2522)
 idx <- sample(nrow(matrix.filt), 500)
 matrix.sample <- matrix.filt[idx, , drop = F]
 
-pheno_ordered <- pheno_filt_ct_unscaled[match(colnames(matrix.sample), 
-                                     pheno_filt_ct_unscaled$rgName), ]
+pheno_ordered <- pheno_complete[match(colnames(matrix.sample), 
+                                     pheno_complete$rgName), ]
 stopifnot(all(!is.na(pheno_ordered$rgName)))
 ```
 
@@ -694,8 +753,8 @@ Testing singular CpGs produced from lmeR model w/bobyqa optimizer
 cpgs_to_test <- lmeR_bobyqa_results[lmeR_bobyqa_results$is_singular==TRUE,]$CpG
 matrix.sample <- matrix.filt[cpgs_to_test, , drop = F]
 
-pheno_ordered <- pheno_filt_ct_unscaled[match(colnames(matrix.sample), 
-                                     pheno_filt_ct_unscaled$rgName), ]
+pheno_ordered <- pheno_complete[match(colnames(matrix.sample), 
+                                     pheno_complete$rgName), ]
 stopifnot(all(!is.na(pheno_ordered$rgName)))
 ```
 
@@ -715,7 +774,7 @@ fit_cpg <- function(probe) {
   mod_function_lmer(
     probe = probe,
     matrix = matrix.sample,
-    pheno = pheno_filt_ct_unscaled,
+    pheno = pheno_complete,
     sample_var = "rgName",    
     id_var = "maskid",           
     age_var = "age_yrs",   
@@ -770,6 +829,7 @@ There is strong subject-to-subject variability in one direction (intercept), and
 * Very small eigenvalues -> one direction has almost no variance
 *	≈ 0 eigenvalue -> model is near-singular
 
+<<<<<<< HEAD
 ```{r}
 mod_function_lmer_traj <- function(
     probe,
@@ -1249,6 +1309,254 @@ traj_mat <- as.matrix(benchmark_res[, ..traj_cols])
 rownames(traj_mat) <- benchmark_res$CpG
 
 ```
+=======
+### Linear vs Non-linear Runs
+
+```{r}
+options(lme4.show_singular_warnings = FALSE)
+t0 <- Sys.time()
+
+ctrl <- lme4::lmerControl(
+  optimizer = "bobyqa",
+  optCtrl = list(maxfun = 2e5))
+
+set.seed(2522)
+benchmark_probes <- sample(rownames(matrix.clean), 1000)
+
+# grid based on age in years
+# age_grid <- c(
+#   0.25, 0.5, 0.75, 1.0,
+#   1.25, 1.5, 1.75, 2.0,
+#   2.5, 3.5, 5.0, 6.0)
+
+# grid based on age in years
+age_grid <- seq(
+  min(pheno_complete$age_yrs, na.rm = TRUE),
+  max(pheno_complete$age_yrs, na.rm = TRUE),
+  length.out = 12)
+
+
+# set number of cores
+future::plan(future::multicore, workers = 10)
+options(future.globals.maxSize = 20 * 1024^3)  # 20 GiB
+
+benchmark_res <- suppressWarnings(
+  future_lapply(benchmark_probes, function(p) {
+  compare_age_models_one_cpg(
+    probe = p,
+    matrix = matrix.clean,
+    pheno = pheno_complete,
+    sample_var = "rgName",
+    id_var = "maskid",
+    age_var = "age_yrs",
+    covs = c("gender", "cc", "CaseControl", "new_Bcell", "new_CD4T",
+             "new_CD8T", "new_Mono", "new_NK"),
+    control = ctrl,
+    pred_age_grid = age_grid,
+    random_slope = T)
+  }))
+
+
+benchmark_res <- data.table::rbindlist(benchmark_res, fill = TRUE)
+#qsave(benchmark_res, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/benchmark_res.qs")
+
+t1 <- Sys.time()
+message("lmeR runtime: ", 
+        round(as.numeric(difftime(t1, t0, units = "mins")), 2), 
+        " minutes")
+```
+
+
+```{r}
+benchmark_summary <- benchmark_res %>%
+  group_by(age_mode, age_df) %>%
+  summarise(
+    n = n(),
+    mean_AIC = mean(AIC, na.rm = TRUE),
+    mean_BIC = mean(BIC, na.rm = TRUE),
+    prop_warning = mean(fit_status == "warning", na.rm = TRUE),
+    prop_error = mean(fit_status == "error", na.rm = TRUE),
+    prop_singular = mean(is_singular, na.rm = TRUE),
+    .groups = "drop")
+
+print(benchmark_summary)
+```
+
+```{r}
+per_cpg_comp <- benchmark_res %>%
+  select(CpG, age_mode, age_df, AIC, BIC, lrt_linear_vs_ns3, lrt_ns3_vs_ns4) %>%
+  distinct()
+
+# AIC percentage of NS (df=4) being better than linear age fit
+aic_pct <- per_cpg_comp %>%
+  mutate(age_mode_df = ifelse(age_mode == "linear", 
+                         "linear", 
+                         paste0(age_mode, "_", age_df))) %>% 
+  select(CpG, age_mode_df, AIC) %>%
+  distinct() %>%
+  pivot_wider(names_from = age_mode_df, values_from = AIC) %>%
+  summarise(pct = mean(ns_4 < linear, na.rm = TRUE) * 100) %>%
+  pull(pct)
+
+# AIC percentage of NS (df=3) being better than linear age fit
+aic_pct2 <- benchmark_res %>%
+    mutate(age_mode_df = ifelse(age_mode == "linear", 
+                         "linear", 
+                         paste0(age_mode, "_", age_df))) %>% 
+  select(CpG, age_mode_df, AIC) %>%
+  distinct() %>%
+  pivot_wider(names_from = age_mode_df, values_from = AIC) %>%
+  summarise(pct = mean(ns_3 < linear, na.rm = TRUE) * 100) %>%
+  pull(pct)
+
+# LRT - will always be better - more complexity better model fit
+
+aic_pct
+aic_pct2
+```
+
+```{r}
+# results should be in long format with at least:
+# CpG, model, AIC
+# where model is something like "linear" and "ns3"
+
+aic_change_summary <- benchmark_res %>%
+    mutate(age_mode_df = ifelse(age_mode == "linear", 
+                         "linear", 
+                         paste0(age_mode, "_", age_df))) %>% 
+  select(CpG, age_mode_df, AIC) %>%
+  distinct() %>%
+  pivot_wider(names_from = age_mode_df, values_from = AIC) %>%
+  mutate(
+    delta_AIC = linear - ns_3,
+    ns3_better = delta_AIC > 0,
+    ns3_better_2 = delta_AIC > 2,
+    ns3_better_10 = delta_AIC > 10) %>%
+  summarise(
+    n_cpg = n(),
+    pct_ns3_better = mean(ns3_better, na.rm = TRUE) * 100,
+    pct_delta_AIC_gt_2 = mean(ns3_better_2, na.rm = TRUE) * 100,
+    pct_delta_AIC_gt_10 = mean(ns3_better_10, na.rm = TRUE) * 100,
+    mean_delta_AIC = mean(delta_AIC, na.rm = TRUE),
+    median_delta_AIC = median(delta_AIC, na.rm = TRUE),
+    q25_delta_AIC = quantile(delta_AIC, 0.25, na.rm = TRUE),
+    q75_delta_AIC = quantile(delta_AIC, 0.75, na.rm = TRUE),
+    q90_delta_AIC = quantile(delta_AIC, 0.90, na.rm = TRUE),
+    q95_delta_AIC = quantile(delta_AIC, 0.95, na.rm = TRUE),
+    max_delta_AIC = max(delta_AIC, na.rm = TRUE))
+
+print(t(aic_change_summary))
+```
+
+Based on median, for more than half of CpGs, linear is slightly better or essentially equivalent.
+But, a subset of CpGs are strongly nonlinear:
+q90 = 41 
+q95 = 87  
+max = 1984
+
+~36% show real improvement of AIC greater than 2
+~21% show strong improvement of AIC greater than 10
+
+Per CpG AIC change
+```{r}
+aic_change_tbl <- benchmark_res %>%
+    mutate(age_mode_df = ifelse(age_mode == "linear", 
+                         "linear", 
+                         paste0(age_mode, "_", age_df))) %>% 
+  select(CpG, age_mode_df, AIC) %>%
+  distinct() %>%
+  pivot_wider(names_from = age_mode_df, values_from = AIC) %>%
+  mutate(
+    delta_AIC = linear - ns_3,
+    ns3_better = delta_AIC > 0,
+    ns3_better_2 = delta_AIC > 2,
+    ns3_better_10 = delta_AIC > 10)
+
+head(aic_change_tbl)
+```
+
+```{r}
+hist(
+  aic_change_tbl$delta_AIC,
+  breaks = 100,
+  main = "Delta AIC: linear - ns3",
+  xlab = "Delta AIC")
+abline(v = c(0, 2, 10), lty = 2)
+```
+
+```{r}
+traj_cols <- grep("^pred_age_", names(benchmark_res), value = TRUE)
+
+traj_mat <- as.matrix(benchmark_res[, ..traj_cols])
+rownames(traj_mat) <- benchmark_res$CpG
+
+```
+
+```{r}
+# split models
+dt_linear <- benchmark_res[age_mode == "linear"]
+dt_ns3    <- benchmark_res[age_mode == "ns" & age_df == 3]
+
+# ensure correct order
+setkey(dt_linear, CpG)
+setkey(dt_ns3, CpG)
+
+all(dt_linear$CpG == dt_ns3$CpG)
+```
+
+```{r}
+# create matrices
+traj_linear <- as.matrix(dt_linear[, ..traj_cols])
+traj_ns3    <- as.matrix(dt_ns3[, ..traj_cols])
+```
+
+```{r}
+cor(as.vector(dist(traj_linear)), as.vector(dist(traj_ns3)))
+```
+
+Main takeaways:
+
+Group 1 (~50%)
+	* mostly linear
+	* spline ≈ linear
+
+Group 2 (~35%)
+	* moderately nonlinear
+	* pline changes curvature but not drastically
+
+Group 3 (~15–20%)
+	* strongly nonlinear
+	* spline fundamentally changes trajectory
+	
+Quick and dirty clustering
+```{r}
+scale_rows <- function(x) {
+  t(scale(t(x), center = TRUE, scale = TRUE))
+}
+
+traj_linear_scaled <- scale_rows(traj_linear)
+traj_ns3_scaled <- scale_rows(traj_ns3)
+
+# handle any constant rows (sd = 0)
+traj_linear_scaled[is.na(traj_linear_scaled)] <- 0
+traj_ns3_scaled[is.na(traj_ns3_scaled)] <- 0
+```
+
+```{r}
+km_linear <- kmeans(traj_linear_scaled, centers = 20)
+km_ns3 <- kmeans(traj_ns3_scaled, centers = 20)
+
+library(mclust)
+adjustedRandIndex(km_linear$cluster, km_ns3$cluster)
+```
+
+The Adjusted Rand Index ranges:
+	*	1.0 → identical clustering
+	*	~0.8–1.0 → very similar
+	*	~0.5–0.7 → moderately similar
+	*	~0.2–0.4 → weak similarity
+	*	~0.0 → essentially unrelated
+>>>>>>> 678fc14 (created new scripts to handle non-linear lmeR model fits to run on Alpine. Updated markdown file to run sample runs to determine if non-linear fits will improve over linear.)
 
 ```{r}
 # split models
