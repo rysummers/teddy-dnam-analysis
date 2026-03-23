@@ -78,7 +78,7 @@ fit_cpg <- function(probe) {
     return_predictions = T,
     REML = T,
     control = ctrl,
-    random_slope = T)
+    random_slope = F)
   }
 
 # set number of cores

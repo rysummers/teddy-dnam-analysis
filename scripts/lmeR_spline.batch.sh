@@ -22,7 +22,7 @@ data_dir="/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis"
 
 pheno="${data_dir}/pheno.csv"
 matrix_qs2="${data_dir}/matrix.clean.qs2" # matrix.filt.qs2
-out_csv="${data_dir}/results/lmeR_spline_results.csv"
+out_csv="${data_dir}/results/lmeR_spline_int_res.csv"
 r_script="${data_dir}/run_lmeR_spline_model.R"
 
 # Make sure logs/results dirs exist

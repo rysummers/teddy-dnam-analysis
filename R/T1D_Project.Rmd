@@ -12,7 +12,7 @@ csl: "apa-5th-edition.csl"
 nocite: '@*'
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
 library(BiocManager)
 library(knitr)
 library(ggplot2)
@@ -68,13 +68,9 @@ library(lmerTest)
 library(future.apply)
 library(data.table)
 library(splines)
-<<<<<<< HEAD
-# CpG Script
-=======
 library(naniar)
 
 # CpG Scripts
->>>>>>> 678fc14 (created new scripts to handle non-linear lmeR model fits to run on Alpine. Updated markdown file to run sample runs to determine if non-linear fits will improve over linear.)
 source("/Users/ryan_summers/GitHub/teddy-dnam-analysis/scripts/CpG_Report.R")
 source("/Users/ryan_summers/GitHub/teddy-dnam-analysis/scripts/lmeR_traj_model.R")
 source("/Users/ryan_summers/GitHub/teddy-dnam-analysis/scripts/lmeR_traj_comparisons.R")
@@ -334,11 +330,7 @@ pheno_complete %>%
 
 ```{r}
 # determine number of subjects within age brackets
-<<<<<<< HEAD
-pheno_filt_ct_unscaled %>%
-=======
 pheno_complete %>%
->>>>>>> 678fc14 (created new scripts to handle non-linear lmeR model fits to run on Alpine. Updated markdown file to run sample runs to determine if non-linear fits will improve over linear.)
   mutate(age_group = cut(age_yrs, 
                          breaks = c(0,1,2,3,4,5,6,7), 
                          include.lowest = TRUE)) %>%
@@ -373,9 +365,9 @@ pheno_longitudinal <- pheno_filt_ct_unscaled %>%
 pheno_subject <- pheno_index %>%
   left_join(pheno_longitudinal, by = "maskid")
 
-<<<<<<< HEAD
+
 pheno_subject$dr34 <- factor(pheno_subject$dr34)
-=======
+
 pheno_subject <- pheno_subject %>%
   mutate(
     dr34 = case_when(
@@ -383,7 +375,7 @@ pheno_subject <- pheno_subject %>%
       dr34 == 0 ~ "No",
       dr34 == 1 ~ "Yes",
       TRUE ~ NA_character_) |> factor(levels = c("No", "Yes")))
->>>>>>> 678fc14 (created new scripts to handle non-linear lmeR model fits to run on Alpine. Updated markdown file to run sample runs to determine if non-linear fits will improve over linear.)
+
 ```
 
 ### Table 1 Study Characterisitcs
@@ -395,22 +387,15 @@ tbl1 <- pheno_subject %>%
            levels = c(1, 2, 3, 4),
            labels = c("Hispanic (all races)", "NHW", "AA", "Other")),
          fdr_3level = factor(fdr_3level, levels = c("none", "dadsib", "mom"),
-<<<<<<< HEAD
                              labels = c("None", "Dad", "Mom")),
          dr34 = case_when(
            is.na(dr34) ~ NA_character_,
            dr34 == 0 ~ "No",
            dr34 == 1 ~ "Yes",
            TRUE ~ NA_character_) |> factor(levels = c("No", "Yes"))) %>% 
-  
-  tbl_summary(
-    by = CaseControl.x,
-=======
-                       labels = c("None", "Dad", "Mom"))) %>% 
-  
+
   tbl_summary(
     by = CaseControl.y,
->>>>>>> 678fc14 (created new scripts to handle non-linear lmeR model fits to run on Alpine. Updated markdown file to run sample runs to determine if non-linear fits will improve over linear.)
     include = c(age_at_diag, n_visits, followup_years, dr34, fdr_3level,
                 gender, race, cc),
     type = list(
@@ -492,11 +477,7 @@ hist(mnts_per_id$n_measurements, breaks = 12, freq = FALSE)
 Number of observations for each participant
 ```{r}
 # determine number of subjects that would give "stable" estimates
-<<<<<<< HEAD
-subj <- pheno_filt_ct_unscaled %>%
-=======
 subj <- pheno_complete %>%
->>>>>>> 678fc14 (created new scripts to handle non-linear lmeR model fits to run on Alpine. Updated markdown file to run sample runs to determine if non-linear fits will improve over linear.)
   group_by(maskid) %>%
   summarise(
     n_obs = n(),
@@ -1742,6 +1723,7 @@ $$
 \mathbf y_i = X_i\beta + Z_i b_i + \epsilon_i
 $$
 
+
 log-likelihood:
 $$
 \ell =
@@ -1758,10 +1740,28 @@ $$
 \hat\beta = (X^\top V^{-1} X)^{-1}X^\top V^{-1} y
 $$
 
+$$
+\hat{b}_i = E(b_i \mid Y_i) = G Z_i^\top V_i^{-1}(Y_i - X_i \hat{\beta})
+$$
+This gives the best prediction of the subject-specific random effects $b_i$, given the observed data $Y_i$.
+  * So b_i captures how individual $i$ deviates from the population trend.
+
+$V_i^{-1}$:
+	*	weights the residuals
+	*	gives less weight to noisy observations
+	*	accounts for correlation in repeated measures
+
+$$
+\hat{b}_i = \text{(variance)} \times \text{(design)}^\top \times \text{(precision)} \times \text{(residual)}
+$$
+
 Subject-level
 $$
 V_i = Var(Y_i) = Z_iGZ^T_i + R_i
 $$
+	*	$V_i$ = total variability of $Y_i$
+	*	from random effects $(Z_i G Z_i^\top)$
+	*	plus noise $(R_i)$
 
 Random effects Var-Cov Matrix
 $$
@@ -1789,6 +1789,7 @@ $$
 
 
 ### Load Results
+
 ```{r}
 # load in Step1B original model results
 step1b_og_results <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/step1b_og_results.qs", nthreads = 6)
@@ -1823,6 +1824,18 @@ lmeR_bobyqa_BLUP_results <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-anal
 lmeR_MAD_results <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/lmeR_MAD_results.csv") %>% select(-1)
 ```
 
+```{r}
+# spline with DF=3 - random int/slope
+lmeR_spline_results <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/lmeR_spline_results.csv") %>% select(-1)
+```
+
+```{r}
+# spline with DF=3 - random intercept only
+lmeR_spline_int_res <- read_csv("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/lmeR_spline_int_res.csv") %>% select(-1)
+```
+
+
+
 ### Exploration Convergence Issues
 
 ```{r}
@@ -1838,7 +1851,7 @@ summary(lme_results$var.rand.slope)
 ```{r}
 # check data matrix (X) for redundancy - DOES NOT EVALUATE Z
 mv <- ~ age_yrs_c + gender + cc + new_Bcell + new_CD4T + new_CD8T + new_Mono + new_NK
-X <- model.matrix(mv, data = pheno_filt_ct_scaled)
+X <- model.matrix(mv, data = pheno_complete)
 
 qr(X)$rank
 ncol(X)
@@ -1939,9 +1952,26 @@ cat("lmeR model w/ default optimization had",
     nrow(lmeR_results[lmeR_results$is_singular==TRUE,]),
     "singular fits\n\n")
 
-cat("lmeR model w/ bobyqa optimization had",
-    nrow(lmeR_bobyqa_results[lmeR_bobyqa_results$is_singular==TRUE,]),
+cat("lmeR model w/ bobyqa had",
+    nrow(lmeR_MAD_results[lmeR_MAD_results$is_singular==TRUE,]),
     "singular fits\n")
+
+cat("lmeR model w/splines had",
+    nrow(lmeR_spline_results[lmeR_spline_results$is_singular==TRUE,]),
+    "singular fits\n")
+
+cat("lmeR model w/splines-int had",
+    nrow(lmeR_spline_int_res[lmeR_spline_int_res$is_singular==TRUE,]),
+    "singular fits\n")
+
+nrow(lmeR_MAD_results[lmeR_MAD_results$is_singular==TRUE,]) / 
+  nrow(lmeR_MAD_results)
+
+nrow(lmeR_spline_results[lmeR_spline_results$is_singular==TRUE,]) / 
+  nrow(lmeR_spline_results)
+
+nrow(lmeR_spline_int_res[lmeR_spline_int_res$is_singular==TRUE,]) / 
+  nrow(lmeR_spline_int_res)
 ```
 
 
@@ -2018,6 +2048,7 @@ cat("lmeR w/bobyqa optimization and MAD outliers removed had ",
     nrow(lmeR_bobyqa_results[lmeR_MAD_results$sig_singular=="Trouble",]),
     "CpGs with a significant slope but was singular\n", 
     "(subjects are inferred to have same slope)")
+
 ```
 
 * 9474 more CpGs with significant slopes and singular
