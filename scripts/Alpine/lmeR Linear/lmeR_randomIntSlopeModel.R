@@ -283,8 +283,29 @@ mod_function_lmer <- function(
     ev1 <- ev[1]; ev2 <- ev[2]
   }, silent = TRUE)
   
+  ## ----Flags for Singular and Outlier detection----
   # create a singular fit flag to identify questionable fits
   singular <- lme4::isSingular(model, tol = 1e-5)
+  
+  # residual-based outlier detection
+  resid_raw <- stats::resid(model)
+  
+  resid_med <- stats::median(resid_raw, na.rm = TRUE)
+  resid_mad <- stats::mad(resid_raw, constant = 1.4826, na.rm = TRUE)
+  
+  if (is.na(resid_mad) || resid_mad == 0) {
+    n_resid_outliers <- NA_integer_
+    prop_resid_outliers <- NA_real_
+    max_abs_resid_zMAD <- NA_real_
+  } else {
+    resid_zMAD <- (resid_raw - resid_med) / resid_mad
+    
+    resid_outlier_flag <- abs(resid_zMAD) >= 4
+    
+    n_resid_outliers <- sum(resid_outlier_flag, na.rm = TRUE)
+    prop_resid_outliers <- mean(resid_outlier_flag, na.rm = TRUE)
+    max_abs_resid_zMAD <- max(abs(resid_zMAD), na.rm = TRUE)
+  }
   
   out <- data.frame(
     CpG = probe,
@@ -313,7 +334,11 @@ mod_function_lmer <- function(
     varcov.rand.eigen.1 = ev1,
     varcov.rand.eigen.2 = ev2,
     is_singular = singular,
-    stringsAsFactors = FALSE
+    stringsAsFactors = FALSE,
+    
+    n_resid_outliers = n_resid_outliers,
+    prop_resid_outliers = prop_resid_outliers,
+    max_abs_resid_zMAD = max_abs_resid_zMAD
   )
   
   if (isTRUE(return_blups)) {

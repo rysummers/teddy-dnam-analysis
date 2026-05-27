@@ -9,9 +9,14 @@
 #SBATCH --account=amc-general
 #SBATCH --time=10:00:00
 #SBATCH --mem=400G
-#SBATCH --qos=mem
+#SBATCH --qos=mem-normal
+
+
+# specify '--qos=mem-normal' for 'amem' jobs with a runtime ≤24 hours 
+# and '--qos=mem-long' for runtimes >24 hours and ≤7 days.
 
 # --- Load Miniforge / Mamba ---
+
 module load miniforge
 
 # Activate environment 
@@ -20,10 +25,10 @@ mamba activate myenv
 # ---- Paths ----
 data_dir="/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis"
 
-pheno="${data_dir}/pheno.csv"
-matrix_qs2="${data_dir}/matrix.clean.qs2" # matrix.filt.qs2
-out_csv="${data_dir}/results/lmeR_spline_int_res.csv"
-r_script="${data_dir}/run_lmeR_spline_model.R"
+pheno="${data_dir}/pheno_complete.csv"
+matrix_qs2="${data_dir}/M.matrix.qs" # matrix.filt.qs2
+out_csv="${data_dir}/results/lmeR_results.csv"
+r_script="${data_dir}/run_lmeR_model.R"
 
 # Make sure logs/results dirs exist
 mkdir -p "${data_dir}/logs" "${data_dir}/results"

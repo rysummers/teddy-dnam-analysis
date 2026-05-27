@@ -1,0 +1,192 @@
+---
+title: "Untitled"
+author: "Ryan Summers"
+date: "2026-05-19"
+output:
+  word_document: default
+  html_document: default
+---
+
+## Filtering Criteria
+
+### 1. Observation-Level Outlier Detection (Robust MAD Filtering)
+
+To reduce the influence of extreme methylation values prior to longitudinal
+modeling, robust median absolute deviation (MAD)-based outlier detection was
+initially applied to the M-value matrix.
+
+For each CpG:
+
+$$
+MAD_i = \text{median}(|x_{ij} - \text{median}(x_i)|)
+$$
+
+where:
+
+* $x_{ij}$ = methylation M-value for CpG (i) in observation (j)
+
+Robust standardized deviations were then computed:
+
+$$
+zMAD_{ij} =
+\frac{x_{ij} - \text{median}(x_i)}
+{MAD_i}
+$$
+
+Observations satisfying:
+
+$$
+|zMAD_{ij}| \ge 3
+$$
+
+were flagged as potential outliers and replaced with `NA` prior to model fitting.
+
+#### Rationale
+
+This step was intended to:
+
+* reduce the influence of extreme technical artifacts
+* stabilize mixed-effects model estimation
+* improve robustness of longitudinal trajectory estimation
+
+#### Limitation
+
+This approach ignores:
+
+* longitudinal ordering
+* subject-level trajectories
+* age-dependent methylation patterns
+
+Therefore, extreme values associated with genuine developmental methylation 
+change may also be flagged. As a result, this procedure should be interpreted 
+primarily as a robust QC/outlier-screening step rather than a biologically 
+informed trajectory filter.
+
+---
+
+### 2. Longitudinal Mixed-Effects Modeling
+
+After preprocessing, CpG-specific longitudinal mixed-effects models were fit using `lme4::lmer()`.
+
+Model form:
+
+$$
+CpG_{ij} =
+\beta_0 +
+\beta_1 Age_{ij} +
+X_{ij}^T\gamma +
+b_{0i} +
+b_{1i}Age_{ij} +
+\epsilon_{ij}
+$$
+
+where:
+
+* $\beta_0$ = fixed intercept
+* $\beta_1$ = fixed age slope
+* $X_{ij}$ = covariate vector
+* $b_{0i}$ = subject-specific random intercept
+* $b_{1i}$ = subject-specific random slope
+* $\epsilon_{ij}$ = residual error
+
+Covariates included:
+
+* sex
+* case/control status
+* estimated cell proportions
+* additional technical/biological covariates as specified
+
+Random-effects structure:
+
+```r
+(age_yrs | maskid)
+```
+
+---
+
+### 3. Candidate “Increasing” CpG Selection
+
+CpGs exhibiting strong positive developmental methylation trajectories were
+identified using the following criteria:
+
+* positive fixed age slope
+* statistically significant age effect
+* substantial total methylation change over the observed age range
+* low baseline methylation
+
+Filtering criteria:
+
+```r
+fixed_slope > 0.01
+baseline_beta < 0.8
+delta_beta > 0.5
+```
+
+where:
+
+* `baseline_beta` = predicted methylation near the earliest observed age
+* `delta_beta` = estimated Beta-value change across the observed age range
+
+#### Rationale
+
+Identifies CpGs with a clear increasing slope, effect size and change in 
+methylation over time. Baselines Beta values less than 0.8 were used to allow 
+room for change.
+
+---
+
+### 4. “Flat” CpG Selection
+
+CpGs exhibiting minimal longitudinal methylation change were identified using:
+
+```r
+abs(fixed_slope) < 0.002
+abs(delta_beta) < 0.01
+baseline_beta > 0.1
+baseline_beta < 0.9
+var.rand.slope < quantile(var.rand.slope, 0.25, na.rm = T)
+```
+
+#### Rationale
+
+Identifies CpGs with a negligible slope and minimal total methylation change 
+over time.
+
+CpGs with baseline Beta-values near 0 or 1 were filtered out because methylation
+at the boundaries is constrained. In other words, CpGs at the boundary may 
+appear flat simply because they have limited capacity for additional methylation 
+change. Restricting baseline Beta-values to 0.1–0.9 selects CpGs that remain 
+stable across age observations.
+
+Random-slope variance estimates from the LMM was used as an additional filter to 
+reduce CpGs with highly variable subject-level trajectories to keep variability
+between subjects low.
+
+Random-slope variance reflects subject-to-subject heterogeneity in age-associated 
+methylation change. 
+
+### 5. “Decreasing” CpG Selection
+
+CpGs exhibiting strong negative methylation change were identified using:
+
+```r
+fixed_slope < -0.01,
+baseline_beta > 0.2,
+delta_beta < -0.5,
+var.rand.slope < quantile(var.rand.slope, 0.95, na.rm = TRUE)
+```
+
+#### Rationale
+
+Identifies CpGs with a clear decreasing slope, effect size and change in 
+methylation over time. 
+
+The baseline Beta filter ensures the CpG starts with enough methylation to 
+meaningfully decrease, where CpGs already near zero cannot show meaningful 
+additional loss. The delta_beta < -0.5 criterion requires a large effect size, 
+and the random-slope variance filter removes CpGs with extremely heterogeneous subject-specific slopes that may be unstable as “gold standard” decreasing examples.
+
+
+
+
+

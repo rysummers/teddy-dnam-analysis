@@ -46,12 +46,12 @@
 #
 # - Replaced the single linear age term with a natural spline basis:
 #     * Uses splines::ns(age_var, df = 3)
-#     * Allows nonlinear modeling of early-life methylation trajectories
+#     * Allows nonlinear modeling of methylation trajectories
 #
 # - Shifted output from single-slope inference toward trajectory extraction:
 #     * Predicted CpG values are generated on a common age grid
 #     * These predicted trajectories are intended for downstream clustering
-#       of CpGs by similar temporal patterns
+#       of CpGs by similar trajectory patterns
 #
 # - Optional support for lmerTest:
 #     * Provides Satterthwaite degrees of freedom
@@ -183,12 +183,12 @@ mod_function_lmer_ns3 <- function(
   }
   
   # ---- build formula ----
-  age_term <- paste0("splines::ns(", age_var, ", df = 3)")
+  age_term <- paste0("splines::ns(", age_var, ", df = 3)") # make more dynamic**
   fixed_terms <- c(age_term, covs)
   fixed_rhs <- paste(fixed_terms, collapse = " + ")
   
   rand_term <- if (isTRUE(random_slope)) {
-    paste0("(", age_var, " | ", id_var, ")")
+    paste0("(", age_term, " | ", id_var, ")") # exchange age_var w/ age_term for spline RE
   } else {
     paste0("(1 | ", id_var, ")")
   }
@@ -259,13 +259,29 @@ mod_function_lmer_ns3 <- function(
   }
   
   # keep intercept if present
-  int_row <- if ("(Intercept)" %in% rownames(fe_tab)) "(Intercept)" else NA_character_
+  int_row <- if ("(Intercept)" %in% rownames(fe_tab))
+    "(Intercept)" 
+  else NA_character_
   
-  fixed_intercept <- if (!is.na(int_row)) fe_tab[int_row, est_col] else NA_real_
-  se_intercept    <- if (!is.na(int_row)) fe_tab[int_row, se_col] else NA_real_
-  t_intercept     <- if (!is.na(int_row) && !is.na(t_col)) fe_tab[int_row, t_col] else NA_real_
-  df_intercept    <- if (!is.na(int_row) && !is.na(df_col)) fe_tab[int_row, df_col] else NA_real_
-  p_intercept     <- if (!is.na(int_row) && !is.na(p_col)) fe_tab[int_row, p_col] else NA_real_
+  fixed_intercept <- if (!is.na(int_row)) 
+    fe_tab[int_row, est_col] 
+  else NA_real_
+  
+  se_intercept <- if (!is.na(int_row)) 
+    fe_tab[int_row, se_col] 
+  else NA_real_
+  
+  t_intercept <- if (!is.na(int_row) && !is.na(t_col)) 
+    fe_tab[int_row, t_col] 
+  else NA_real_
+  
+  df_intercept <- if (!is.na(int_row) && !is.na(df_col))
+    fe_tab[int_row, df_col] 
+  else NA_real_
+  
+  p_intercept <- if (!is.na(int_row) && !is.na(p_col)) 
+    fe_tab[int_row, p_col] 
+  else NA_real_
   
   # optional: keep spline basis coefficients
   ns_rows <- grep(paste0("^splines::ns\\(", age_var, ", df = 3\\)"), rownames(fe_tab))
@@ -348,35 +364,29 @@ mod_function_lmer_ns3 <- function(
     varcov.rand.eigen.1 = ev1,
     varcov.rand.eigen.2 = ev2,
     is_singular = singular,
-    stringsAsFactors = FALSE
-  )
+    stringsAsFactors = FALSE)
   
-  # ---- predicted trajectory on age_grid ----
+  # ---- average predicted trajectory on age_grid ----
+  ## averages predicted trajectories over the cohort covariate distribution
   if (isTRUE(return_predictions)) {
-    pred_df <- data.frame(age_tmp = age_grid)
-    names(pred_df)[1] <- age_var
+    pred_list <- lapply(age_grid, function(a) {
+      nd <- forAnalysis
+      
+      ## for each grid age a, we are evaluating the fitted model at that age
+      ## for all observed covariate patterns, then averaging those predictions.
+      nd[[age_var]] <- a
+      
+      # fixed-effects-only prediction
+      p <- predict(model, newdata = nd, re.form = NA, allow.new.levels = TRUE)
+      mean(p, na.rm = TRUE) # marginal predicted trajectory
+    })
     
-    for (cv in covs) {
-      x <- forAnalysis[[cv]]
-      if (is.factor(x)) {
-        pred_df[[cv]] <- factor(levels(x)[1], levels = levels(x))
-      } else {
-        pred_df[[cv]] <- stats::median(x, na.rm = TRUE)
-      }
-    }
-    
-    pred_df[[id_var]] <- forAnalysis[[id_var]][1]
-    
-    preds <- tryCatch(
-      stats::predict(model, newdata = pred_df, re.form = NA, allow.new.levels = TRUE),
-      error = function(e) rep(NA_real_, length(age_grid)))
-    
+    preds <- unlist(pred_list)
     pred_names <- paste0("pred_age_", format(round(age_grid, 3), trim = TRUE))
     pred_row <- as.data.frame(t(preds))
     names(pred_row) <- pred_names
     
     out <- cbind(out, pred_row)
   }
-  
   out
 }

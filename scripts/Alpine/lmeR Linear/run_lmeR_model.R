@@ -7,6 +7,7 @@ suppressPackageStartupMessages({
   library(lmerTest)
   library(future.apply)
   library(qs2)
+  library(qs)
   library(tidyverse)
   library(SummarizedExperiment)
   library(variancePartition)   # dream()
@@ -24,7 +25,7 @@ out_csv    <- args[[3]]
 
 # workers: number of cores to run in parallel
 # careful: too many cores and be too demanding on memory
-workers <- 10
+workers <- 18
 
 message("pheno:  ", pheno)
 message("matrix_qs: ", matrix_qs2)
@@ -47,7 +48,7 @@ pheno_filt_ct <- pheno_filt_ct %>%
 # convert age to years for scalability in modeul running
 pheno_filt_ct$age_yrs <- pheno_filt_ct$sample_agedys / 365.25
 
-matrix.filt   <- qs_read(matrix_qs2, nthreads = min(6, workers))
+matrix.filt   <- qread(matrix_qs2, nthreads = min(6, workers))
 
 # load R scripts containing needed functions
 source("/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis/lmeR_randomIntSlopeModel.R")
@@ -73,7 +74,7 @@ fit_cpg <- function(probe) {
              "new_CD8T", "new_Mono", "new_NK"),    
     return_blups = F, # keep FALSE for intercept only modelling
     control = ctrl,
-    random_slope = 1 # references the age by days variable
+    random_slope = "age_yrs" # references the age by days (yrs) variable
   )}
 
 # set number of cores

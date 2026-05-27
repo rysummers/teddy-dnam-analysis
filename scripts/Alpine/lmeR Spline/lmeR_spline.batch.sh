@@ -3,11 +3,11 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=20
 #SBATCH --partition=amem
-#SBATCH --job-name="dream_model"
+#SBATCH --job-name="lmeR_Spline_RE"
 #SBATCH --output="/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis/logs/%x_%j.out"
 #SBATCH --error="/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis/logs/%x_%j.err"
 #SBATCH --account=amc-general
-#SBATCH --time=10:00:00
+#SBATCH --time=96:00:00
 #SBATCH --mem=400G
 #SBATCH --qos=mem
 
@@ -21,9 +21,9 @@ mamba activate myenv
 data_dir="/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis"
 
 pheno="${data_dir}/pheno.csv"
-matrix_qs2="${data_dir}/matrix.filt.qs2"
-out_qs2="${data_dir}/results/dream.model.qs2"
-r_script="${data_dir}/run_dream_model.R"
+matrix_qs2="${data_dir}/matrix.filt_xy.qs" # matrix.filt.qs2
+out_csv="${data_dir}/results/lmeR_spline_RE.csv"
+r_script="${data_dir}/run_lmeR_spline_RE.R"
 
 # Make sure logs/results dirs exist
 mkdir -p "${data_dir}/logs" "${data_dir}/results"
@@ -37,6 +37,6 @@ export MKL_NUM_THREADS=1
 which Rscript
 Rscript -e 'print(.libPaths())'
 
-Rscript "$r_script" "$pheno" "$matrix_qs2" "$out_qs2" 
+Rscript "$r_script" "$pheno" "$matrix_qs2" "$out_csv" 
 
 
