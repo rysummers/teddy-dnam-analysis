@@ -26,3 +26,4 @@ renv/staging/
 # Quarto / R Markdown
 *_cache/
 *_files/
+docs/age_trajectory_check copy.html
