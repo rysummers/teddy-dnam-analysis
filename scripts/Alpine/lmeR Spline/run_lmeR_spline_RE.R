@@ -23,7 +23,7 @@ pheno      <- args[[1]]
 matrix_qs2 <- args[[2]]
 out_prefix <- args[[3]]
 
-workers <- 15
+workers <- 20
 
 message("pheno:  ", pheno)
 message("matrix_qs: ", matrix_qs2)
@@ -67,9 +67,12 @@ fit_cpg <- function(probe) {
                probs = seq(0, 1, length.out = 12),
                na.rm = TRUE)),
     return_predictions = TRUE,
+    return_blups = FALSE,
+    return_subject_predictions = TRUE,
+    subject_pred_age_grid = c(0.2026010, 0.5010267, 0.7501711,0.9938398),
     REML = TRUE,
     control = ctrl,
-    random_slope = TRUE)
+    random_slope = FALSE)
 }
 
 future::plan(future::multicore, workers = workers)
@@ -86,27 +89,32 @@ blup_tbl <- data.table::rbindlist(
   lapply(test_res, `[[`, "blup_row"),
   fill = TRUE)
 
+subject_pred_tbl <- data.table::rbindlist(
+  lapply(test_res, `[[`, "subject_pred_row"),
+  fill = TRUE)
+
 t1 <- Sys.time()
 message(
   "lme runtime: ",
   round(as.numeric(difftime(t1, t0, units = "mins")), 2),
   " minutes")
 
-summary_file <- paste0(out_prefix, "_summary.qs")
-blup_file    <- paste0(out_prefix, "_blup.qs")
-
 qs::qsave(
   summary_tbl,
-  file = summary_file,
+  file = paste0(out_prefix, "_summary.qs"),
   preset = "balanced",
   nthreads = min(12, workers))
 
 qs::qsave(
   blup_tbl,
-  file = blup_file,
+  file = paste0(out_prefix, "_blup.qs"),
   preset = "balanced",
   nthreads = min(12, workers))
 
-message("Saved summary: ", summary_file)
-message("Saved blup: ", blup_file)
+qs::qsave(
+  subject_pred_tbl,
+  file = paste0(out_prefix, "_subject_predictions.qs"),
+  preset = "balanced",
+  nthreads = min(12, workers))
+
 

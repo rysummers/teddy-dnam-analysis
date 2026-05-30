@@ -8,11 +8,14 @@ mod_function_lmer_ns3 <- function(
     covs = NULL,
     age_grid = NULL,
     return_predictions = TRUE,
+    return_subject_predictions = TRUE,
+    subject_pred_age_grid = NULL,
+    return_blups = FALSE,
     return_model = FALSE,
     use_lmerTest = TRUE,
     REML = TRUE,
     control = NULL,
-    random_slope = FALSE) 
+    random_slope = FALSE)
 {
   
   make_error_return <- function(probe_val, msg) {
@@ -278,7 +281,7 @@ mod_function_lmer_ns3 <- function(
   if (length(re_var_cols) > 0) {
     summary_row <- cbind(summary_row, as.data.frame(re_var_cols, check.names = FALSE))
   }
-  
+  ############  population level predictions ########### 
   if (isTRUE(return_predictions)) {
     pred_vals <- vapply(age_grid, function(a) {
       nd <- forAnalysis
@@ -291,57 +294,86 @@ mod_function_lmer_ns3 <- function(
     pred_row <- as.data.frame(as.list(stats::setNames(pred_vals, pred_names)))
     summary_row <- cbind(summary_row, pred_row)
   }
+  ########### subject-level predictions ########### 
+  subject_pred_row <- data.frame(CpG = probe, stringsAsFactors = FALSE)
   
-  re_subj <- tryCatch(ranef(model)[[id_var]], error = function(e) NULL)
-  
-  if (is.null(re_subj)) {
-    blup_long <- data.frame()
-    blup_row <- data.frame(CpG = probe, stringsAsFactors = FALSE)
-  } else {
-    re_subj[[id_var]] <- rownames(re_subj)
+  if (isTRUE(return_subject_predictions)) {
     
-    clean_term <- function(x) {
-      if (x == "(Intercept)") return("intercept")
-      if (grepl(ns_pattern, x)) {
-        idx <- sub(ns_pattern, "", x)
-        idx <- gsub("[^0-9]", "", idx)
-        if (nzchar(idx)) return(paste0("ns", idx))
-        return("ns")
-      }
-      gsub("[^A-Za-z0-9]+", "_", x)
+    if (is.null(subject_pred_age_grid)) {
+      subject_pred_age_grid <- age_grid
     }
     
-    original_terms <- setdiff(colnames(re_subj), id_var)
-    clean_terms <- vapply(original_terms, clean_term, character(1))
-    colnames(re_subj)[match(original_terms, colnames(re_subj))] <- clean_terms
+    # one row per subject
+    subj_ids <- unique(as.character(forAnalysis[[id_var]]))
     
-    blup_long_list <- lapply(clean_terms, function(tt) {
-      data.frame(
-        CpG = probe,
-        subject_id = as.character(re_subj[[id_var]]),
-        term = tt,
-        blup = re_subj[[tt]],
-        stringsAsFactors = FALSE
-      )
-    })
-    blup_long <- do.call(rbind, blup_long_list)
-    
-    # one CpG per row
-    blup_vals <- list(CpG = probe)
-    for (tt in clean_terms) {
-      for (sid in as.character(re_subj[[id_var]])) {
-        col_nm <- paste0(tt, "_", sid)
-        blup_vals[[col_nm]] <- re_subj[re_subj[[id_var]] == sid, tt][1]
-      }
+    for (a in subject_pred_age_grid) {
+      
+      nd <- forAnalysis[match(subj_ids, as.character(forAnalysis[[id_var]])), , drop = FALSE]
+      nd[[age_var]] <- a
+      
+      p_subj <- predict(model,newdata = nd,re.form = NULL,allow.new.levels = FALSE)
+      
+      pred_nm <- paste0("subjpred_age_",format(round(a, 3), trim = TRUE),"_")
+      
+      vals <- as.list(as.numeric(p_subj))
+      names(vals) <- paste0(pred_nm, subj_ids)
+      
+      subject_pred_row <- cbind(
+        subject_pred_row,
+        as.data.frame(vals, check.names = FALSE))
     }
-    blup_row <- as.data.frame(blup_vals, check.names = FALSE, stringsAsFactors = FALSE)
   }
   
+  blup_long <- data.frame()
+  blup_row <- data.frame(CpG = probe, stringsAsFactors = FALSE)
+  
+  if (isTRUE(return_blups)) {
+    re_subj <- tryCatch(ranef(model)[[id_var]], error = function(e) NULL)
+    
+    if (!is.null(re_subj)) {
+      re_subj[[id_var]] <- rownames(re_subj)
+      
+      clean_term <- function(x) {
+        if (x == "(Intercept)") return("intercept")
+        if (grepl(ns_pattern, x)) {
+          idx <- sub(ns_pattern, "", x)
+          idx <- gsub("[^0-9]", "", idx)
+          if (nzchar(idx)) return(paste0("ns", idx))
+          return("ns")
+        }
+        gsub("[^A-Za-z0-9]+", "_", x)
+      }
+      
+      original_terms <- setdiff(colnames(re_subj), id_var)
+      clean_terms <- vapply(original_terms, clean_term, character(1))
+      colnames(re_subj)[match(original_terms, colnames(re_subj))] <- clean_terms
+      
+      blup_long_list <- lapply(clean_terms, function(tt) {
+        data.frame(
+          CpG = probe,
+          subject_id = as.character(re_subj[[id_var]]),
+          term = tt,
+          blup = re_subj[[tt]],
+          stringsAsFactors = FALSE)
+      })
+      blup_long <- do.call(rbind, blup_long_list)
+      blup_vals <- list(CpG = probe)
+      for (tt in clean_terms) {
+        for (sid in as.character(re_subj[[id_var]])) {
+          col_nm <- paste0(tt, "_", sid)
+          blup_vals[[col_nm]] <- re_subj[re_subj[[id_var]] == sid, tt][1]
+        }
+      }
+      
+      blup_row <- as.data.frame(blup_vals, check.names = FALSE, stringsAsFactors = FALSE)
+    }
+  }
+
   out <- list(
     summary_row = summary_row,
     blup_row = blup_row,
-    blup_long = blup_long
-  )
+    blup_long = blup_long,
+    subject_pred_row = subject_pred_row)
   
   if (isTRUE(return_model)) {
     out$model <- model

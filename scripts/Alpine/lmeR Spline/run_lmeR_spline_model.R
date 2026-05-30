@@ -24,7 +24,7 @@ out_csv    <- args[[3]]
 
 # workers: number of cores to run in parallel
 # careful: too many cores and be too demanding on memory
-workers <- 15 # intentionally below SLURM ntasks to limit memory pressure
+workers <- 20 # intentionally below SLURM ntasks to limit memory pressure
 
 message("pheno:  ", pheno)
 message("matrix_qs: ", matrix_qs2)
