@@ -1,0 +1,13 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Page-1" id="R2HWDPDgs7qqof6w3L0u">
+    <mxGraphModel dx="904" dy="629" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="3SekrGVWfVys4_vhVCC8-1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0050ef;fontColor=#ffffff;strokeColor=#001DBC;" value="&lt;div&gt;&lt;font style=&quot;font-size: 18px;&quot;&gt;&amp;nbsp;&lt;font&gt;QC&#39;d M-value Matrix&amp;nbsp;&lt;/font&gt;&lt;/font&gt;&lt;/div&gt;&lt;div&gt;&lt;font style=&quot;font-size: 14px;&quot;&gt;CpGs=790,944 ; samples=1407 ; subj=209&lt;/font&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="110" width="220" x="80" y="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
