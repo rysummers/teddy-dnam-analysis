@@ -48,7 +48,7 @@ Trajectory Annotation (characterization)
 Current preprocessing steps include:
 
 * Removal of sex chromosome CpGs
-* Selection of control subjects
+* Selection of control subjects (current direction - may change in downstream analysis)
 * Evaluation of outlier detection strategies
 
 ### Longitudinal Modeling
