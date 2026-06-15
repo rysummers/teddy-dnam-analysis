@@ -1,62 +1,92 @@
-# TEDDY DNAm Longitudinal Analysis
+# TEDDY Longitudinal DNA Methylation Analysis
 
-This project aims to analyze longitudinal DNA methylation (DNAm) changes in the TEDDY cohort and to identify genetic and environmental factors associated with type 1 diabetes (T1D) risk.
+## Overview
 
-The primary objectives are:
+This project investigates developmental DNA methylation (DNAm) trajectories in 
+the TEDDY (The Environmental Determinants of Diabetes in the Young) cohort.
 
-1. **Catalog methylation changes over time**  
-   - Characterize developmental DNAm trajectories.
+Longitudinal mixed-effects spline models are used to estimate CpG-specific
+methylation trajectories across early childhood. Predicted trajectories are 
+subsequently evaluated for evidence of latent methylation strata, filtered to
+remove non-informative patterns, and clustered to identify common developmental
+methylation profiles.
 
-2. **Identify CpG sites that change over time**  
-   - Fit longitudinal models to identify CpGs with non-zero slopes.
-   - Quantify within- and between-subject variability in methylation change.
+The overall goal is to characterize large-scale patterns of DNAm change over 
+time and identify distinct classes of developmental methylation trajectories.
 
-3. **Compare genetic and environmental models**  
-   - Fit and compare models incorporating:
-     - genetic risk measures
-     - environmental exposure variables
-   - Evaluate which factors explain variation in baseline DNAm and longitudinal change.
+## Objectives
 
-4. **Identify exposure covariates associated with methylation change**  
-   - Identify exposures that modify the rate of DNAm change over time.
-  
-5. **Evaluate non-linear time trends for specific CpG sites (may be too computationally expensive or difficult to interpret)**  
-  - Compare linear vs non-linear age functions (quadratic terms, piecewise) to capture early-life curvatures in DNAm trajectories.
+* Model longitudinal methylation trajectories across early childhood.
+* Identify CpGs exhibiting sub-trajectory patterns (strata).
+* Remove non-informative ("flat") trajectories.
+* Cluster CpGs according to developmental trajectory shape.
+* Characterize the dynamics and biological features of resulting trajectory classes.
 
-6. **Cluster CpGs**
-   - Use unsupervised ML methods to cluster CpGs based on similarity of methylation patterns across samples.
-  
-## Study background 
+## Analysis Workflow
 
-TEDDY is a prospective cohort study designed to identify environmental triggers of type 1 diabetes (T1D) in genetically at-risk children. While genetic susceptibility is necessary, it is not sufficient to cause disease. This study focuses on early-life epigenetic patterns, measured via DNAm, as potential mediators of environmental exposure.
+```text
+M-value Matrix
+        ↓
+Preprocessing
+        ↓
+CpG-wise Mixed-Effects Spline Models
+        ↓
+Predicted Methylation Trajectories
+        ↓
+Trajectory Filtering
+    • Flat CpGs
+    • Sub-trajectory CpGs (GMM)
+        ↓
+Trajectory Clustering
+        ↓
+Trajectory Annotation (characterization)
 
-## Modeling strategy
+```
 
-Longitudinal DNAm data are analyzed using linear mixed-effects models fit separately for each CpG site.
+### Preprocessing
 
-### Core model structure
+Current preprocessing steps include:
 
-- **Outcome:** DNAm beta value (transformed M-values)
-- **Time variable:** Age (centered at birth)
-- **Random effects:**
-  - Subject-specific intercept (baseline DNAm value)
-  - Subject-specific slope (rate of DNAm change over time)
-- **Fixed effects:**
-  - Time (**test non-linear functions of time??**)
-  - Sex
-  - Cell-type composition
-  - Study site (when applicable)
-  - Exposure covariates (TBD)
+* Removal of sex chromosome CpGs
+* Selection of control subjects
+* Evaluation of outlier detection strategies
 
+### Longitudinal Modeling
 
-## Model comparisons
+A mixed-effects spline model is fit separately for each CpG to estimate
+age-associated methylation trajectories.
 
-Multiple model specifications are fit to assess the contribution of different covariates and comparisons are performed using likelihood-based criteria (e.g. AIC)
+Predicted methylation values are generated across a predefined age grid and 
+used as trajectory features for downstream analyses.
 
-- Base longitudinal model (time + demographic covariates)
-- Models including genetic risk measures
-- Models including environmental exposure variables
-- Models including non-linear functions of time (quadratic or piecewise)
+### Gaussian Mixture Modeling (GMM)
+
+Gaussian mixture models are applied to identify CpGs exhibiting sub-trajectory
+patterns (multiple methylation strata).
+
+These CpGs are separated from the primary trajectory clustering workflow and 
+may be investigated independently.
+
+### Trajectory Clustering
+
+Remaining CpGs are clustered according to their predicted developmental
+methylation profiles.
+
+The objective is to identify common classes of methylation change, including:
+
+* increasing trajectories
+* decreasing trajectories
+* complex non-linear patterns (early change then plateau)
+
+### Trajectory Annotation
+
+Trajectory classes will be summarized using:
+
+* overall trajectory shape
+* rates of methylation change
+* inflection points
+* genomic annotation
+* functional annotation
 
 
 ## Downstream analyses
@@ -64,19 +94,24 @@ Multiple model specifications are fit to assess the contribution of different co
 - exposure association analyses
 - hypothesis generation related to T1D risk 
 
-## Project Structure
+## Repository Structure
 
-| Directory | Description |
-|---------|-------------|
-| `R/` | Contains all R code to perform data processing, exploratory analyses, and model building. |
-| `scripts/` | Contains R scripts for custom functions and Alpine scripts (.batch) for HPC. |
-| `reports/` | Contains analysis reports, integrating results, figures, and interpretations. |
-| `results/` | Contains output files generated by R scripts, including summary tables and intermediate results (excluding sensitive data). |
-| `figures/` | Contains visualizations and plots generated during analysis for reporting and interpretation. |
-| `docs/` | Contains general project documentation and supporting literature not directly part of the analysis pipeline. |
-
-
+| Directory  | Description                                     |
+| ---------- | ----------------------------------------------- |
+| `R/`       | Analysis functions and modeling code            |
+| `scripts/` | Standalone analysis scripts and HPC batch jobs  |
+| `results/` | Intermediate and final analysis outputs         |
+| `reports/` | Analysis reports and summaries                  |
+| `figures/` | Figures and visualizations                      |
+| `docs/`    | Project documentation and supporting literature |
 
 
+## Project Status
 
+Current development efforts focus on:
 
+* refining trajectory representations
+* identifying multi-modal CpGs using GMMs
+* defining robust criteria for flat trajectories
+* evaluating trajectory clustering approaches
+* characterizing developmental methylation patterns
