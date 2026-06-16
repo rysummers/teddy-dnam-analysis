@@ -64,7 +64,7 @@ informed trajectory filter.
 
 ---
 
-### 2. Longitudinal Mixed-Effects Modeling
+### 2. Linear Mixed-Effects Modeling
 
 After preprocessing, CpG-specific longitudinal mixed-effects models were fit using `lme4::lmer()`.
 
@@ -186,73 +186,20 @@ meaningfully decrease, where CpGs already near zero cannot show meaningful
 additional loss. The delta_beta < -0.5 criterion requires a large effect size, 
 and the random-slope variance filter removes CpGs with extremely heterogeneous subject-specific slopes that may be unstable as “gold standard” decreasing examples.
 
-
-Here is a clean GMM section you can paste under your filtering criteria.
-
-5. Gaussian Mixture Model Screening for Bimodal / Multimodal CpGs
-
-To identify CpGs with evidence of latent methylation subgroups, Gaussian mixture models were fit to the subject-specific random intercept estimates from the LMM. This was intended to flag CpGs where subjects appear to separate into two or more baseline methylation strata rather than following one unimodal population distribution.
-
-For each CpG, subject-specific intercept estimates were extracted 
-($\hat{b}_{0i}$):
-
-where: $\hat{b}_{0i}$ represents the estimated subject-specific baseline methylation deviation for subject i.
-
-Gaussian mixture models were fit per CpG using G = 1, 2, 3 mixture groups. The optimal number of groups was selected using BIC.
-
-Filtering criteria for candidate bimodal CpGs:
-
-```
-best_G == 2
-mean_uncertainty < 0.1
-min_prop > 0.1
-mean_sep_min > 0.5
+```r
+age_grid = quantile(
+pheno_filt_ct$age_yrs,
+probs = seq(0, 1, length.out = 12))
 ```
 
-Filtering criteria for candidate trimodal CpGs:
+“Are there specific developmental windows where you would expect most methylation changes to occur? We’re currently sampling the spline trajectories at ages based on quantiles, but we could instead evaluate trajectories at biologically relevant ages.”
 
-```
-best_G == 3
-mean_uncertainty < 0.1
-min_prop > 0.1
-mean_sep_min > 0.75
-```
+For context, I am looking to cluster CpGs depending on whether theyre increasing or decreasing and I am using a spline model to predict trajectories based on specific ages and use those as features for clustering
 
-where:
 
-`best_G`
 
-is the best grouping number selected by BIC.
-
-`mean_uncertainty`
-
-is the average uncertainty in assigning CpGs to groups.
-
-`min_prop`
-
-is the smallest group proportion.
-
-`mean_sep_min`
-
-is the minimum separation between neighboring group means on the M-value scale.
-
-Example:
-```
-[-2.1, -0.4, 1.8]
--0.4 - (-2.1) = 1.7
-1.8 - (-0.4) = 2.2
-mean_sep_min = min(diff(sort(means))) = 1.7
-```
-
-Rationale
-
-This step was used to identify CpGs with evidence of distinct subject-level methylation strata. CpGs with two or more well-separated mixture components may represent biologically or technically distinct subgroups, such as sex chromosome effects, genotype-associated methylation states, imprinting, cell-state mixtures, or other latent subgroup structure.
-
-The uncertainty filter removes CpGs where subjects cannot be confidently assigned to a mixture component. The minimum component proportion filter removes CpGs where one component is driven by only a small number of outlying subjects. The mean separation filter ensures that the identified components are meaningfully separated on the M-value scale rather than representing weak overfitting of a broad unimodal distribution.
-
-Limitation
-
-A mixture model with G = 2 or G = 3 does not automatically guarantee visually obvious bimodality or trimodality. Therefore, candidate multimodal CpGs should be visually inspected and interpreted cautiously. These CpGs may not represent smooth developmental methylation trajectories and may need to be analyzed separately from trajectory-clustering analyses.
-
+$$
+D1_k = \frac{\hat{M}(a_{k+1}) - \hat{M}(a_k)} {a_{k+1} - a_k}
+$$
 
 

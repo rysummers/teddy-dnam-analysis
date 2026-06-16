@@ -95,25 +95,25 @@ subject_pred_tbl <- data.table::rbindlist(
 
 t1 <- Sys.time()
 message(
-  "lme runtime: ",
+  "Runtime: ",
   round(as.numeric(difftime(t1, t0, units = "mins")), 2),
   " minutes")
 
 qs::qsave(
   summary_tbl,
-  file = paste0(out_prefix, "_summary.qs"),
+  file = "/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis/results/summary_tbl_summary.qs",
   preset = "balanced",
   nthreads = min(12, workers))
 
 qs::qsave(
   blup_tbl,
-  file = paste0(out_prefix, "_blup.qs"),
+  file = "/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis/results/blup_tbl.qs",
   preset = "balanced",
   nthreads = min(12, workers))
 
 qs::qsave(
   subject_pred_tbl,
-  file = paste0(out_prefix, "_subject_predictions.qs"),
+  file = "/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis/results/subject_pred_tbl.qs",
   preset = "balanced",
   nthreads = min(12, workers))
 
