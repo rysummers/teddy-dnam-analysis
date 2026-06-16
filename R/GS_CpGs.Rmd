@@ -201,5 +201,64 @@ For context, I am looking to cluster CpGs depending on whether theyre increasing
 $$
 D1_k = \frac{\hat{M}(a_{k+1}) - \hat{M}(a_k)} {a_{k+1} - a_k}
 $$
+### 6. GMM for Bimodal/Trimodal CpGs
+To identify CpGs with subtrajectory groups, Gaussian mixture models (GMM) were 
+fit to the subject-specific random intercept estimates from the LMM. This was 
+intended to flag CpGs where subjects appear to separate into two or more baseline
+methylation strata.
+
+For each CpG, subject-specific intercept estimates were extracted (b ̂_0i):
+where: b ̂_0i represents the estimated subject-specific baseline methylation
+deviation for subject i from the fitting spline model.
+
+GMM were fit per CpG using G = 1, 2, 3 mixture groups. The optimal number of groups was selected using BIC.
+
+Filtering criteria for candidate bimodal CpGs:
+
+```r
+best_G == 2
+mean_uncertainty < 0.1
+min_prop > 0.1
+mean_sep_min > 0.5
+```
+Filtering criteria for candidate trimodal CpGs:
+
+```r
+best_G == 3
+mean_uncertainty < 0.1
+min_prop > 0.1
+mean_sep_min > 0.75
+```
+
+where: 
+	* best_G is the best grouping number selected by BIC.
+	* mean_uncertainty is the average uncertainty in assigning subjects to groups 
+	for each CpG.
+	* min_prop is the smallest group proportion observed in the bi/tri-modal 
+	groups. In other words, it requires all groups to contain at least 10% of 
+	subjects.
+	* mean_sep_min is the minimum separation between neighboring group means on 
+	the M-value scale.
+	
+Example:
+```r
+[-2.1, -0.4, 1.8]
+-0.4 - (-2.1) = 1.7
+1.8 - (-0.4) = 2.2
+mean_sep_min = min(diff(sort(means))) = 1.7
+```
+
+#### Rationale
+This step was used to identify CpGs with evidence of distinct subject-level 
+methylation strata. The uncertainty filter removes CpGs where subjects cannot 
+be confidently assigned to a mixture group. The minimum component proportion 
+filter removes CpGs where one group is driven by only a small number of outlying
+subjects. The mean separation filter ensures that the identified groups are 
+meaningfully separated on the M-value scale.
+
+#### Limitation
+The mixture model does not guarantee visually obvious bimodality or trimodality. 
+Therefore, candidate multimodal CpGs should be visually inspected and interpreted 
+cautiously. 
 
 
