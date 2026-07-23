@@ -7,9 +7,9 @@
 #SBATCH --output="/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis/logs/%x_%j.out"
 #SBATCH --error="/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis/logs/%x_%j.err"
 #SBATCH --account=amc-general
-#SBATCH --time=96:00:00
+#SBATCH --time=8:00:00
 #SBATCH --mem=400G
-#SBATCH --qos=mem
+#SBATCH --qos=mem-normal
 
 # --- Load Miniforge / Mamba ---
 module load miniforge
@@ -20,8 +20,8 @@ mamba activate myenv
 # ---- Paths ----
 data_dir="/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis"
 
-pheno="${data_dir}/pheno.csv"
-matrix_qs2="${data_dir}/matrix.filt_xy.qs" # matrix.filt.qs2
+pheno="${data_dir}/pheno_complete.csv"
+matrix_qs2="${data_dir}/matrix.ctrls.qs" # matrix.filt.qs2
 out_prefix="${data_dir}/results/lmeR_spline_RE"
 r_script="${data_dir}/run_lmeR_spline_RE.R"
 
@@ -37,6 +37,6 @@ export MKL_NUM_THREADS=1
 which Rscript
 Rscript -e 'print(.libPaths())'
 
-Rscript "$r_script" "$pheno" "$matrix_qs2" "$out_csv" 
+Rscript "$r_script" "$pheno" "$matrix_qs2" "$out_prefix"
 
 

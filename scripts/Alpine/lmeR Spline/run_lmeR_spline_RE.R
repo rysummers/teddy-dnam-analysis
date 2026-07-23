@@ -37,12 +37,22 @@ Sys.setenv(
 
 pheno_filt_ct <- read_csv(pheno, show_col_types = FALSE)
 
+pheno_filt_ct$age_yrs <- pheno_filt_ct$sample_agedys / 365.25
+
 pheno_filt_ct <- pheno_filt_ct %>%
   mutate(across(c(maskid, cc, gender, CaseControl), as.factor))
 
-pheno_filt_ct$age_yrs <- pheno_filt_ct$sample_agedys / 365.25
-
 matrix.filt <- qread(matrix_qs2, nthreads = min(12, workers))
+unimodal_cpgs <- qread("/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis/unimodal_cpgs.qs", nthreads=12)
+matrix.filt <- matrix.filt[rownames(matrix.filt) %in% unimodal_cpgs$CpG, ]
+
+pheno_filt_ct <- pheno_filt_ct %>%
+  filter(rgName %in% colnames(matrix.filt)) %>% # match samples w/Matrix****
+  mutate(across(c(maskid, cc, gender, CaseControl), droplevels))
+
+message("matrix samples: ", ncol(matrix.filt))
+message("pheno rows after control overlap: ", nrow(pheno_filt_ct))
+message("unique subjects: ", length(unique(pheno_filt_ct$maskid)))
 
 source("/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis/lmeR_SplineModel_RE.R")
 
@@ -60,16 +70,15 @@ fit_cpg <- function(probe) {
     sample_var = "rgName",
     id_var = "maskid",
     age_var = "age_yrs",
-    covs = c("gender", "cc", "CaseControl", "new_Bcell", "new_CD4T",
+    covs = c("gender", "cc", "new_Bcell", "new_CD4T", # removed CaseControl
              "new_CD8T", "new_Mono", "new_NK"),
     age_grid = as.numeric(
       quantile(pheno_filt_ct$age_yrs,
                probs = seq(0, 1, length.out = 12),
                na.rm = TRUE)),
     return_predictions = TRUE,
-    return_blups = FALSE,
-    return_subject_predictions = TRUE,
-    subject_pred_age_grid = c(0.2026010, 0.5010267, 0.7501711,0.9938398),
+    return_blups = TRUE,
+    return_subject_predictions = FALSE,
     REML = TRUE,
     control = ctrl,
     random_slope = FALSE)
@@ -89,32 +98,36 @@ blup_tbl <- data.table::rbindlist(
   lapply(test_res, `[[`, "blup_row"),
   fill = TRUE)
 
-subject_pred_tbl <- data.table::rbindlist(
-  lapply(test_res, `[[`, "subject_pred_row"),
-  fill = TRUE)
+prediction_tbl <- data.table::rbindlist(
+  lapply(test_res, `[[`, "prediction_long"),
+  fill = TRUE,
+  use.names = TRUE
+)
+
 
 t1 <- Sys.time()
 message(
-  "Runtime: ",
+  "lme runtime: ",
   round(as.numeric(difftime(t1, t0, units = "mins")), 2),
   " minutes")
 
+
 qs::qsave(
   summary_tbl,
-  file = "/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis/results/summary_tbl_summary.qs",
+  file = paste0(out_prefix, "_summary_ctrls.qs"),
   preset = "balanced",
   nthreads = min(12, workers))
 
 qs::qsave(
   blup_tbl,
-  file = "/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis/results/blup_tbl.qs",
+  file = paste0(out_prefix, "_blup_ctrls.qs"),
   preset = "balanced",
   nthreads = min(12, workers))
 
 qs::qsave(
-  subject_pred_tbl,
-  file = "/scratch/alpine/rsummers@xsede.org/teddy_dnam_analysis/results/subject_pred_tbl.qs",
+  prediction_tbl,
+  file = paste0(out_prefix, "_predictions_ctrls.qs"),
   preset = "balanced",
-  nthreads = min(12, workers))
-
+  nthreads = min(12, workers)
+)
 

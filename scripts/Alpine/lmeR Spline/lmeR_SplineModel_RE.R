@@ -50,17 +50,30 @@ mod_function_lmer_ns3 <- function(
       ns1_p = NA_real_,
       ns2_p = NA_real_,
       ns3_p = NA_real_,
+      ns1_p = NA_real_,
+      ns2_p = NA_real_,
+      ns3_p = NA_real_,
+      
+      age_omnibus_F = NA_real_,
+      age_omnibus_numdf = NA_real_,
+      age_omnibus_dendf = NA_real_,
+      age_omnibus_p = NA_real_,
+      
       var.resid = NA_real_,
       is_singular = NA,
       stringsAsFactors = FALSE
     )
     
     blup_row <- data.frame(CpG = probe_val, stringsAsFactors = FALSE)
-    
+    # returns two separate tables. 
+    # one with typical model stats and one with BLUP estimates
+    # another two tables will store the confidence and prediction SEs
     return(list(
       summary_row = summary_row,
+      prediction_long = data.frame(),
       blup_row = blup_row,
       blup_long = data.frame(),
+      subject_pred_row = data.frame(),
       model = NULL
     ))
   }
@@ -190,17 +203,138 @@ mod_function_lmer_ns3 <- function(
   df_intercept    <- if (!is.na(int_row) && !is.na(df_col)) fe_tab[int_row, df_col] else NA_real_
   p_intercept     <- if (!is.na(int_row) && !is.na(p_col)) fe_tab[int_row, p_col] else NA_real_
   
-  ns_pattern <- paste0("^splines::ns\\(", age_var, ", df = 3\\)")
-  ns_rows <- grep(ns_pattern, rownames(fe_tab))
+  # ns_pattern <- paste0("^splines::ns\\(", age_var, ", df = 3\\)")
+  # ns_rows <- grep(ns_pattern, rownames(fe_tab))
+  # 
+  # ns_est <- ns_se <- ns_t <- ns_df <- ns_p <- rep(NA_real_, 3)
+  # if (length(ns_rows) > 0) {
+  #   take <- seq_len(min(3, length(ns_rows)))
+  #   ns_est[take] <- fe_tab[ns_rows[take], est_col]
+  #   ns_se[take]  <- fe_tab[ns_rows[take], se_col]
+  #   if (!is.na(t_col))  ns_t[take]  <- fe_tab[ns_rows[take], t_col]
+  #   if (!is.na(df_col)) ns_df[take] <- fe_tab[ns_rows[take], df_col]
+  #   if (!is.na(p_col))  ns_p[take]  <- fe_tab[ns_rows[take], p_col]
+  # }
+  
+  # Match spline coefficient names with or without "splines::"
+  ns_pattern <- paste0(
+    "^(splines::)?ns\\(",
+    age_var,
+    ",[[:space:]]*df[[:space:]]*=[[:space:]]*3\\)[1-3]$"
+  )
+  
+  ns_rows <- grep(
+    ns_pattern,
+    rownames(fe_tab),
+    perl = TRUE
+  )
+  
+  # Put coefficients in basis-function order
+  if (length(ns_rows) > 0) {
+    ns_rows <- ns_rows[
+      order(as.integer(
+        sub(".*\\)([1-3])$", "\\1", rownames(fe_tab)[ns_rows])
+      ))
+    ]
+  }
   
   ns_est <- ns_se <- ns_t <- ns_df <- ns_p <- rep(NA_real_, 3)
+  
   if (length(ns_rows) > 0) {
-    take <- seq_len(min(3, length(ns_rows)))
+    take <- seq_len(min(3L, length(ns_rows)))
+    
     ns_est[take] <- fe_tab[ns_rows[take], est_col]
     ns_se[take]  <- fe_tab[ns_rows[take], se_col]
-    if (!is.na(t_col))  ns_t[take]  <- fe_tab[ns_rows[take], t_col]
-    if (!is.na(df_col)) ns_df[take] <- fe_tab[ns_rows[take], df_col]
-    if (!is.na(p_col))  ns_p[take]  <- fe_tab[ns_rows[take], p_col]
+    
+    if (!is.na(t_col)) {
+      ns_t[take] <- fe_tab[ns_rows[take], t_col]
+    }
+    
+    if (!is.na(df_col)) {
+      ns_df[take] <- fe_tab[ns_rows[take], df_col]
+    }
+    
+    if (!is.na(p_col)) {
+      ns_p[take] <- fe_tab[ns_rows[take], p_col]
+    }
+  }
+  
+  ############################################################
+  # Omnibus Wald F-test of all spline coefficients
+  #
+  # H0: ns1 = ns2 = ns3 = 0
+  ############################################################
+  
+  age_omnibus_F <- NA_real_
+  age_omnibus_numdf <- NA_real_
+  age_omnibus_dendf <- NA_real_
+  age_omnibus_p <- NA_real_
+  
+  if (
+    requireNamespace("lmerTest", quietly = T) &&
+    length(ns_rows) == 3L
+  ) {
+    
+    coef_names <- names(lme4::fixef(model))
+    
+    # Match spline coefficients in fixef(model)
+    ns_idx <- grep(ns_pattern, coef_names, perl = T)
+    
+    if (length(ns_idx) == 3L) {
+      
+      # Put coefficients in basis-function order
+      ns_idx <- ns_idx[
+        order(as.integer(
+          sub(".*\\)([1-3])$", "\\1", coef_names[ns_idx])
+        ))
+      ]
+      
+      # Construct a 3 x p joint-contrast matrix
+      L <- matrix(
+        0,
+        nrow = 3L,
+        ncol = length(coef_names),
+        dimnames = list(
+          coef_names[ns_idx],
+          coef_names
+        )
+      )
+      
+      L[cbind(seq_len(3L), ns_idx)] <- 1
+      
+      # contestMD requires an lmerTest model
+      model_for_test <- if (
+        inherits(model, "lmerModLmerTest")
+      ) {
+        model
+      } else {
+        tryCatch(
+          lmerTest::as_lmerModLmerTest(model),
+          error = function(e) NULL
+        )
+      }
+      
+      if (!is.null(model_for_test)) {
+        age_test <- tryCatch(
+          lmerTest::contestMD(
+            model_for_test,
+            L = L,
+            rhs = rep(0, 3L),
+            ddf = "Satterthwaite"
+          ),
+          error = function(e) NULL)
+        
+        if (!is.null(age_test)) {
+          age_omnibus_F <- as.numeric(age_test[["F value"]][1])
+          
+          age_omnibus_numdf <- as.numeric(age_test[["NumDF"]][1])
+          
+          age_omnibus_dendf <- as.numeric(age_test[["DenDF"]][1])
+          
+          age_omnibus_p <- as.numeric(age_test[["Pr(>F)"]][1])
+        }
+      }
+    }
   }
   
   nObs   <- stats::nobs(model)
@@ -273,6 +407,12 @@ mod_function_lmer_ns3 <- function(
     ns1_p   = ns_p[1],
     ns2_p   = ns_p[2],
     ns3_p   = ns_p[3],
+    
+    age_omnibus_F = age_omnibus_F,
+    age_omnibus_numdf = age_omnibus_numdf,
+    age_omnibus_dendf = age_omnibus_dendf,
+    age_omnibus_p = age_omnibus_p,
+    
     var.resid = var.resid,
     is_singular = singular,
     stringsAsFactors = FALSE
@@ -281,17 +421,183 @@ mod_function_lmer_ns3 <- function(
   if (length(re_var_cols) > 0) {
     summary_row <- cbind(summary_row, as.data.frame(re_var_cols, check.names = FALSE))
   }
-  ############  population level predictions ########### 
+  # ############  population level predictions ########### 
+  # if (isTRUE(return_predictions)) {
+  #   pred_vals <- vapply(age_grid, function(a) {
+  #     nd <- forAnalysis
+  #     nd[[age_var]] <- a
+  #     p <- predict(model, newdata = nd, re.form = NA, allow.new.levels = TRUE)
+  #     mean(p, na.rm = TRUE)
+  #   }, numeric(1))
+  #   
+  #   pred_names <- paste0("pred_age_", format(round(age_grid, 3), trim = TRUE))
+  #   pred_row <- as.data.frame(as.list(stats::setNames(pred_vals, pred_names)))
+  #   summary_row <- cbind(summary_row, pred_row)
+  # }
+  
+  ############################################################
+  # Population-level predictions and uncertainty
+  ############################################################
+  
+  prediction_long <- data.frame()
+  
   if (isTRUE(return_predictions)) {
-    pred_vals <- vapply(age_grid, function(a) {
+    
+    beta <- lme4::fixef(model)
+    Vbeta <- as.matrix(stats::vcov(model))
+    
+    # These stored terms preserve the knots used to fit ns(age, df = 3)
+    fixed_terms <- stats::delete.response(
+      stats::terms(model, fixed.only = TRUE)
+    )
+    
+    original_X <- lme4::getME(model, "X")
+    original_contrasts <- attr(original_X, "contrasts")
+    
+    # Random-effect variance-covariance matrix
+    G <- tryCatch(
+      as.matrix(lme4::VarCorr(model)[[id_var]]),
+      error = function(e) NULL
+    )
+    
+    residual_var <- stats::sigma(model)^2
+    
+    prediction_list <- lapply(age_grid, function(a) {
+      
       nd <- forAnalysis
       nd[[age_var]] <- a
-      p <- predict(model, newdata = nd, re.form = NA, allow.new.levels = TRUE)
-      mean(p, na.rm = TRUE)
-    }, numeric(1))
+      
+      # Population-level predictions, excluding subject BLUPs
+      p <- stats::predict(
+        model,
+        newdata = nd,
+        re.form = NA,
+        allow.new.levels = TRUE
+      )
+      
+      estimate <- mean(p, na.rm = TRUE)
+      
+      # Fixed-effect model matrix using the original spline knots
+      X <- stats::model.matrix(
+        fixed_terms,
+        data = nd,
+        contrasts.arg = original_contrasts
+      )
+      
+      # Account for columns potentially dropped because of rank deficiency
+      missing_beta_cols <- setdiff(names(beta), colnames(X))
+      
+      if (length(missing_beta_cols) > 0L) {
+        stop(
+          "Prediction matrix is missing fixed-effect columns: ",
+          paste(missing_beta_cols, collapse = ", ")
+        )
+      }
+      
+      X <- X[, names(beta), drop = FALSE]
+      
+      # Average over the observed covariate distribution
+      xbar <- colMeans(X)
+      
+      fixed_var <- as.numeric(
+        xbar %*% Vbeta %*% xbar
+      )
+      
+      fixed_var <- max(fixed_var, 0)
+      confidence_se <- sqrt(fixed_var)
+      
+      ##########################################################
+      # Random-effect variance for a new subject
+      ##########################################################
+      
+      random_var <- NA_real_
+      
+      if (!is.null(G)) {
+        
+        if (!isTRUE(random_slope)) {
+          
+          # Random-intercept model
+          random_var <- as.numeric(G[1, 1])
+          
+        } else {
+          
+          # Random intercept plus spline slopes
+          z <- rep(0, ncol(G))
+          names(z) <- colnames(G)
+          
+          if ("(Intercept)" %in% names(z)) {
+            z["(Intercept)"] <- 1
+          }
+          
+          random_slope_names <- setdiff(
+            names(z),
+            "(Intercept)"
+          )
+          
+          matched_names <- intersect(
+            random_slope_names,
+            names(xbar)
+          )
+          
+          z[matched_names] <- xbar[matched_names]
+          
+          random_var <- as.numeric(
+            t(z) %*% G %*% z
+          )
+        }
+      }
+      
+      random_var <- if (
+        is.na(random_var)
+      ) {
+        NA_real_
+      } else {
+        max(random_var, 0)
+      }
+      
+      # Prediction interval for one new observation from a new subject
+      prediction_var <- fixed_var + random_var + residual_var
+      prediction_se <- sqrt(prediction_var)
+      
+      data.frame(
+        CpG = probe,
+        age = as.numeric(a),
+        
+        predicted_CpG = estimate,
+        
+        confidence_se = confidence_se,
+        confidence_lower = estimate - 1.96 * confidence_se,
+        confidence_upper = estimate + 1.96 * confidence_se,
+        
+        random_effect_var = random_var,
+        residual_var = residual_var,
+        
+        prediction_se = prediction_se,
+        prediction_lower = estimate - 1.96 * prediction_se,
+        prediction_upper = estimate + 1.96 * prediction_se,
+        
+        stringsAsFactors = FALSE
+      )
+    })
     
-    pred_names <- paste0("pred_age_", format(round(age_grid, 3), trim = TRUE))
-    pred_row <- as.data.frame(as.list(stats::setNames(pred_vals, pred_names)))
+    prediction_long <- data.table::rbindlist(
+      prediction_list,
+      fill = TRUE
+    )
+    
+    # Optional: retain the original wide predictions in summary_row
+    pred_vals <- prediction_long$predicted_CpG
+    
+    pred_names <- paste0(
+      "pred_age_",
+      format(round(age_grid, 3), trim = TRUE)
+    )
+    
+    pred_row <- as.data.frame(
+      as.list(stats::setNames(pred_vals, pred_names)),
+      check.names = FALSE
+    )
+    
     summary_row <- cbind(summary_row, pred_row)
   }
   ########### subject-level predictions ########### 
@@ -371,9 +677,11 @@ mod_function_lmer_ns3 <- function(
 
   out <- list(
     summary_row = summary_row,
+    prediction_long = prediction_long,
     blup_row = blup_row,
     blup_long = blup_long,
-    subject_pred_row = subject_pred_row)
+    subject_pred_row = subject_pred_row
+  )
   
   if (isTRUE(return_model)) {
     out$model <- model
