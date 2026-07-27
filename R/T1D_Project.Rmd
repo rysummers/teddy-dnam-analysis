@@ -52,6 +52,9 @@ library(cluster)
 library(dpGMM)
 library(fda)
 library(segmented)
+library(refund)
+library(compositions)
+library(performance)
 
 # Scripts
 source("/Users/ryan_summers/Library/Mobile\ Documents/com~apple~CloudDocs/GitHub/teddy-dnam-analysis/scripts/CpG_Report.R")
@@ -275,6 +278,75 @@ sample_ids <- readRDS(file.path(bp, "sample_ids.rds"))
 
 ```
 
+### Load Model Results
+
+vroom = 5.95236 secs
+fread = 2.61801
+read_csv = 12.89397 secs
+
+```{r}
+# spline with DF=3 - random int/slope w/ chrX
+#/Library/Mobile\ Documents/com~apple~CloudDocs
+lmeR_spline_results <- fread("/Users/ryan_summers/Library/Mobile\ Documents/com~apple~CloudDocs/GitHub/teddy-dnam-analysis/results/lmeR_spline_results.csv") %>% select(-1)
+```
+
+```{r}
+# slope models with chrX
+lmeR_spline_int_full <- fread("/Users/ryan_summers/Library/Mobile\ Documents/com~apple~CloudDocs/GitHub/teddy-dnam-analysis/results/lmeR_spline_int_res.csv") %>% select(-1)
+```
+
+```{r}
+# spline models w/out chrX
+lmeR_spline_int_slope_res <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_summary.qs",nthreads=12)
+
+# controls & intercept only w/out chrX
+spline_int_results <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_summary_ctrls.qs",nthreads=12)
+
+# icloud
+lmeR_spline_int_res <- qread("/Users/ryan_summers/Library/Mobile\ Documents/com~apple~CloudDocs/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_summary_inty.qs",nthreads=6)
+
+lmeR_spline_int_slope_res <- qread("/Users/ryan_summers/Library/Mobile\ Documents/com~apple~CloudDocs/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_summary.qs",nthreads=6)
+
+```
+
+Controls only w/ chrX removed:
+```{r}
+# splines intercepts 
+spline_int_BLUPs_full <- 
+  qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_blup_ctrls_full.qs", nthreads=12)
+
+# spline summary results
+spline_summary_BLUPs <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_summary_ctrls.qs",nthreads=12)
+```
+
+Controls only w/ chrx removed and model with only spline coefficient and random intercept
+ - fit on Beta values
+```{r}
+# used as features for GMM
+spline_int_BLUPs_beta <- 
+  qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_blup_ctrls_beta.qs",nthreads=12)
+
+spline_summary_BLUPs_beta <- qread(
+  "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_summary_ctrls_beta.qs",
+  nthreads=12)
+
+spline_int_BLUPs_M <- 
+  qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_blup_ctrls_Mvalue.qs",nthreads=12)
+```
+
+
+Controls only w/ sub-trajectories removed from GMM step:
+```{r}
+# splines intercepts 
+spline_int_BLUPs <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_blup_ctrls.qs",nthreads=12)
+
+# spline summary results
+spline_summary_BLUPs <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_summary_ctrls.qs",nthreads=12)
+
+# prediction stats
+spline_pred_stats <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_predictions_ctrls.qs",nthreads=12)
+```
+
 
 ## Exploratory Data Analysis (EDA)
 
@@ -370,6 +442,44 @@ pheno_complete %>%
 
 [0,1] = 0 ≤ age ≤ 1
 (1,2] = 1 < age ≤ 2
+
+Distribution of subject's first visit 
+```{r}
+first_visits <- pheno_complete %>%
+  group_by(maskid) %>%
+  summarise(first_age = min(age_yrs, na.rm = TRUE))
+
+sapply(windows, function(x) sum(first_visits$first_age <= min_age + x))
+
+hist(first_visits$first_age, breaks = 30,
+     main = "Distribution of each subject's first observed age")
+abline(v = min_age, col = "red", lty = 2)
+
+summary(first_visits$first_age)
+```
+
+```{r}
+hist(pheno$age_yrs[pheno$age_yrs <= min_age + 1],
+     breaks = 40,
+     main = "Age distribution, first year after minimum",
+     xlab = "Age (years)")
+abline(v = min_age, col = "red", lty = 2)
+```
+
+
+```{r}
+min_age <- min(pheno$age_yrs, na.rm = TRUE)
+
+## how many observations fall within various windows of the minimum
+windows <- c(0.05, 0.1, 0.25, 0.5, 1.0, 2, 3, 4, 5, 6)  # years
+
+sapply(windows, function(w) sum(pheno$age_yrs <= min_age + w, na.rm = TRUE))
+
+sapply(windows, function(w) {
+  length(unique(pheno$maskid[pheno$age_yrs <= min_age + w]))
+})
+```
+
 
 ```{r}
 # observation per subject and case/control status
@@ -839,7 +949,7 @@ iqr_outliers %>%
 
 ```{r}
 # example CpG
-probe <- "cg26928153"
+probe <- "cg05653622"
 i <- match(probe, probe_ids) # find match
 
 if (is.na(i)) stop("Probe not found: ", probe)
@@ -847,53 +957,231 @@ if (is.na(i)) stop("Probe not found: ", probe)
 pheno <- pheno_complete
 
 # pull methylation values for one CpG
-cpg <- as.numeric(matrix.clean[i, ])
-names(cpg) <- sample_ids
+cpg_m <- as.numeric(matrix.clean[i, ])
+cpg_b <- as.numeric(m2beta(matrix.clean[i, ]))
+names(cpg_m) <- sample_ids
+names(cpg_b) <- sample_ids
 
 # attach CpG values to phenotype by sample ID
-pheno$CpG <- cpg[as.character(pheno$rgName)]
+pheno$CpG_M <- cpg_m[as.character(pheno$rgName)]
+pheno$CpG_B <- cpg_b[as.character(pheno$rgName)]
 
 # keep only variables needed for the model
 vars_needed <- c(
-  "CpG", "maskid", "age_yrs",
+  "CpG_M", "CpG_B","maskid", "age_yrs",
   "gender", "cc", "CaseControl",
   "new_Bcell", "new_CD4T", "new_CD8T", "new_Mono", "new_NK")
 
+# 656 observations for controls and chrX removed
 dat <- pheno[complete.cases(pheno[, vars_needed]), vars_needed, drop = FALSE]
+
+# recenter age
+min_age <- min(pheno$age_yrs, na.rm = TRUE)  # 0.2026
+dat$age_yrs_centered <- dat$age_yrs - min_age
 
 # fit model
 m1 <- lmer(
-  CpG ~ ns(age_yrs, df = 3) + gender + cc +
-    new_Bcell + new_CD4T + new_CD8T + new_Mono + new_NK +
-    (1 | maskid),
+  CpG_B ~ ns(age_yrs, df = 3) + (1 | maskid),
   data = dat,
   REML = T)
 
-m2 <- lmer(
-  CpG ~ bs(age_yrs, df = 3) + gender + cc +
-    new_Bcell + new_CD4T + new_CD8T + new_Mono + new_NK +
-    (1 | maskid),
-  data = dat,
-  REML = T)
-
-# # cell composition is confounding the age trend and dominates the signal
-# m3 <- lmer(
-#   CpG ~ age_yrs + gender + cc + 
-#     new_Bcell + new_CD4T + new_CD8T + new_Mono + new_NK +
-#     (1 | maskid),
+# library(glmmTMB)
+# m2 <- glmmTMB(
+#   CpG_B ~ ns(age_yrs, df = 3) + (1 | maskid),
 #   data = dat,
-#   REML = T)
+#   family = beta_family())   # models Var(y) as a function of mean(y) explicitly
 
+# fit model
+m2 <- lmer(
+  CpG_B ~ ns(age_yrs_centered, df = 3) + (1 | maskid),
+  data = dat,
+  REML = T)
 
 summary(m1)
 summary(m2)
 #summary(m3)
-anova(m1,m2)
+BIC(m1,m2)
+
+## does the intercept differ meaningfully from the un-recentered one?
+predict(m1, newdata = data.frame(age_yrs = 0, maskid = NA), re.form = NA)
+## vs., centered model:
+predict(m2, newdata = data.frame(age_yrs_centered = 0, maskid = NA), re.form = NA)
+
+```
+
+
+```{r}
+# extract random intercepts + number of obs per subject
+re_df <- data.frame(maskid = as.numeric(rownames(ranef(m1)$maskid)),
+                     re_int = ranef(m1)$maskid[,1])
+n_obs  <- pheno %>% dplyr::count(maskid)
+re_df  <- left_join(re_df, n_obs, by = "maskid")
+
+plot(re_df$n, re_df$re_int)  # look for a relationship between shrinkage and n_obs
+```
+
+ICC: proportion of variance attributed to between subjects (maskid / maskid+residual)
+```{r}
+performance::icc(m1)
+VarCorr(m1)
+```
+
+Random intercepts (BLUPs) from ranef() are not subject-level absolute values — they're each subject's estimated deviation from the population-average intercept (the fixed effect). By construction, these deviations are centered at (or very near) zero across the population, so roughly half the subjects will have negative BLUPs (below-average subjects) and half will have positive ones (above-average subjects). That's not a modeling problem; it's the definition of a random intercept. To get each subject's actual predicted level, you add the BLUP to the fixed intercept
+
+```{r}
+head(ranef(m1))
+head(ranef(m2))
+
+head(fixef(m1)["(Intercept)"] + ranef(m1)$maskid[, "(Intercept)"], 10 ) 
+head(m2beta(fixef(m3)["(Intercept)"] + ranef(m3)$maskid[, "(Intercept)"] ), 10)
+## subject-level predicted beta, correctly back-transformed
+fixed_intercept_logit <- fixef(m2)$cond["(Intercept)"]
+subj_ranef_logit <- ranef(m2)$cond$maskid[, "(Intercept)"]
+
+subj_pred_logit <- fixed_intercept_logit + subj_ranef_logit
+subj_pred_beta <- plogis(subj_pred_logit)   # back to [0,1] beta scale
+
+head(subj_pred_beta, 10)
 
 ```
 
 ```{r}
-pred_res <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_predictions_ctrls.qs", nthreads = 12)
+compare_df <- data.frame(
+  maskid = rownames(ranef(m1)$maskid),  # adjust to your actual id source
+  lmer_beta   = fixef(m1)["(Intercept)"] + ranef(m1)$maskid[, "(Intercept)"],
+  lmer_M_conv = m2beta(fixef(m3)["(Intercept)"] + ranef(m3)$maskid[, "(Intercept)"]),
+  glmm_beta   = subj_pred_beta)
+
+## pairwise correlations
+cor(compare_df[,-1])
+
+## pairwise absolute differences
+compare_df$diff_lmerB_lmerM  <- compare_df$lmer_beta - compare_df$lmer_M_conv
+compare_df$diff_lmerB_glmm   <- compare_df$lmer_beta - compare_df$glmm_beta
+compare_df$diff_lmerM_glmm   <- compare_df$lmer_M_conv - compare_df$glmm_beta
+
+summary(compare_df[, c("diff_lmerB_lmerM", "diff_lmerB_glmm", "diff_lmerM_glmm")])
+library(GGally)  # or build manually with patchwork
+ggpairs(compare_df[, c("lmer_beta", "lmer_M_conv", "glmm_beta")])
+
+compare_df$mean_lmerB_glmm <- (compare_df$lmer_beta + compare_df$glmm_beta) / 2
+compare_df$diff_lmerB_glmm <- compare_df$lmer_beta - compare_df$glmm_beta
+
+ggplot(compare_df, aes(mean_lmerB_glmm, diff_lmerB_glmm)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  geom_hline(yintercept = mean(compare_df$diff_lmerB_glmm) + 
+               c(-1.96, 1.96) * sd(compare_df$diff_lmerB_glmm),
+             color = "blue", linetype = "dotted") +
+  labs(x = "Mean of two estimates", y = "Difference (lmer_beta - glmm_beta)",
+       title = "Bland-Altman: LMM(beta) vs glmmTMB(beta_family)")
+
+fit3_lmerB <- Mclust(compare_df$lmer_beta,   G = 1:3); fit3_lmerB$G
+fit3_lmerM <- Mclust(compare_df$lmer_M_conv, G = 1:3); fit3_lmerM$G
+fit3_glmm  <- Mclust(compare_df$glmm_beta,   G = 1:3); fit3_glmm$G
+
+compare_df$cluster_lmerB <- fit3_lmerB$classification
+compare_df$cluster_lmerM <- fit3_lmerM$classification
+compare_df$cluster_glmm  <- fit3_glmm$classification
+
+## cross-tabs: do subjects get assigned to the same cluster regardless of which model's estimates you use?
+table(compare_df$cluster_lmerB, compare_df$cluster_glmm)
+table(compare_df$cluster_lmerB, compare_df$cluster_lmerM)
+
+## simple agreement rate (careful: cluster labels 1/2/3 are arbitrary across fits,
+## so you may need to align labels by matching cluster means first)
+```
+Comparison of subject-level estimates from a Gaussian LMM fit on β-values, a Gaussian LMM fit on M-values (back-transformed), and a beta-family GLMM (logit link) revealed the expected pattern of link-function-driven divergence, with maximal absolute disagreement (~0.01 β-units) occurring away from β=0.5 (Supplementary Figure X). This discrepancy was an order of magnitude smaller than our effect-size threshold for biological relevance (β-range ≥ XXX) and did not alter subsequent Gaussian mixture model cluster assignments (Supplementary Table X).
+
+Schielzeth et al stated that fixed-effect estimates are relatively robust but BLUPs (random effect predictions) are "frequently misestimated"
+
+```{r}
+## Compare raw per-subject mean beta vs. the model's extracted random intercepts
+raw_subject_means <- dat %>%   # replace with your actual column reference
+  group_by(maskid) %>% 
+  summarise(mean_M = mean(CpG, na.rm = TRUE))
+
+## vs. the BLUP intercepts you actually clustered on
+ranef_intercepts <- ranef(m1)$maskid[, "(Intercept)"]  # adjust if this is per-CpG stored elsewhere
+
+hist(raw_subject_means$mean_M, breaks = 30, main = "Raw per-subject mean M-value")
+hist(ranef_intercepts, breaks = 30, main = "Model BLUP intercepts")
+```
+
+```{r}
+## Force-fit 1, 2, and 3 component models and compare directly, 
+## rather than trusting the default's automatic selection
+fit1 <- Mclust(raw_subject_means$mean_M, G = 1)
+fit2 <- Mclust(raw_subject_means$mean_M, G = 2)
+fit3 <- Mclust(raw_subject_means$mean_M, G = 3)
+fit4 <- Mclust(raw_subject_means_beta$mean_beta, G = 1:3) ; fit4$G
+
+BIC(fit1, fit2, fit3)  # or compare fit1$bic, fit2$bic, fit3$bic directly
+plot(fit3, what = "density")  # visual check of the 3-component fit against the histogram
+```
+
+```{r}
+raw_subject_means_beta <- dat %>%
+  group_by(maskid) %>%
+  summarise(mean_beta = mean(m2beta(CpG), na.rm = TRUE))
+  # or mean(raw_beta_col) directly if you have beta stored separately from M
+
+hist(raw_subject_means_beta$mean_beta, breaks = 30)
+
+fit1_b <- Mclust(raw_subject_means_beta$mean_beta, G = 1)
+fit2_b <- Mclust(raw_subject_means_beta$mean_beta, G = 2)
+fit3_b <- Mclust(raw_subject_means_beta$mean_beta, G = 3)
+fit4_b <- Mclust(raw_subject_means_beta$mean_beta, G = 1:3) ; fit4_b$G
+BIC(fit1_b, fit2_b, fit3_b)
+```
+
+```{r}
+summary(fit3_b, parameters = TRUE)
+
+## visual check against your histogram
+plot(fit3_b, what = "density")
+plot(fit3_b, what = "classification")
+```
+```{r}
+subj_data <- dat %>%
+  group_by(maskid) %>%
+  summarise(mean_beta = mean(m2beta(CpG), na.rm = TRUE),
+            gender = first(gender), cc = first(cc),
+            new_Bcell = mean(new_Bcell), new_CD4T = mean(new_CD4T),
+            new_CD8T = mean(new_CD8T), new_Mono = mean(new_Mono),
+            new_NK = mean(new_NK))
+
+## quick check: does cluster membership predict any covariate?
+subj_data$cluster <- fit3_b$classification  # from your earlier beta-scale 3-component fit
+
+composition_matrix <- as.matrix(subj_data[
+  , c("new_Bcell", "new_CD4T", "new_CD8T", "new_Mono", "new_NK")])
+
+fit_manova <- manova(composition_matrix ~ factor(cluster), data = subj_data)
+summary(fit_manova)                    # overall test
+summary.aov(fit_manova)                 # per-cell-type breakdown, same univariate tests as before, but now framed correctly as follow-ups to a joint test rather than five independent tests
+## repeat for gender (chisq.test instead, since it's categorical) and other cell types
+## Site (cc) vs cluster -- both categorical
+table_cc <- table(subj_data$cluster, subj_data$cc)
+table_cc
+chisq.test(table_cc)
+
+
+## Gender vs cluster -- both categorical
+table_gender <- table(subj_data$cluster, subj_data$gender)
+table_gender
+chisq.test(table_gender)
+```
+
+```{r}
+## the real three-way comparison you want, side by side
+BIC(fit1, fit3)                    # raw M subject means -- you have this: weak 3>1 (~2 units)
+BIC(fit1_b, fit3_b)                # raw beta subject means -- you have this: strong 3>1 (~10.6 units)
+
+## the piece you haven't directly shown yet:
+fit1_ranef <- Mclust(ranef_intercepts, G = 1)
+fit3_ranef <- Mclust(ranef_intercepts, G = 3)
+BIC(fit1_ranef, fit3_ranef)        # BLUP intercepts -- what does THIS actually say?
 ```
 
 
@@ -941,7 +1229,7 @@ L <- matrix(
 
 L[cbind(1:3, ns_idx)] <- 1
 
-lmerTest::contestMD(m1, L=L, rhs = 0,ddf = "Satterthwaite")
+lmerTest::contestMD(m1, L=L, rhs = 0, ddf = "Satterthwaite")
 ```
 Predicted methylation at age (a) toy example
 ```{r}
@@ -1236,43 +1524,6 @@ getSpagPlot_big(
   probe_ids = probe_ids,
   sample_ids = sample_ids,
   pred_df = plot_df)
-```
-
-
-### Plotting Spline Trajectories
-
-```{r}
-cpg_id <- "cg12025418"
-plot_dt <- melt(
-  lmeR_spline_int_res[CpG == cpg_id],
-  id.vars = "CpG",
-  measure.vars = pred_cols,
-  variable.name = "age_col",
-  value.name = "pred")
-
-plot_dt[, age := as.numeric(sub("^pred_age_", "", age_col))]
-
-ggplot(plot_dt, aes(x = age, y = pred)) +
-  geom_line(size = 1) +
-  geom_point() +
-  theme_classic() +
-  labs(
-    title = paste("Trajectory for", cpg_id),
-    x = "Age (years)",
-    y = "Predicted methylation")
-```
-
-```{r}
-getSpagPlot_big(
-  CpG = "cg20389709",
-  mvals_bm = matrix.clean,
-  value_type = "beta", #beta or m
-  y_limits = c(0,1),
-  age_unit = "years",
-  pheno = pheno_complete,
-  anno = anno,
-  probe_ids = probe_ids,
-  sample_ids = sample_ids)
 ```
 
 
@@ -1603,97 +1854,6 @@ In DNAm data:
 Therefore, cell composition is likely explaining most of the apparent age-related 
 change CpGs
 
-### Load Results
-
-
-vroom = 5.95236 secs
-fread = 2.61801
-read_csv = 12.89397 secs
-
-
-```{r}
-# spline with DF=3 - random int/slope w/ chrX
-#/Library/Mobile\ Documents/com~apple~CloudDocs
-lmeR_spline_results <- fread("/Users/ryan_summers/Library/Mobile\ Documents/com~apple~CloudDocs/GitHub/teddy-dnam-analysis/results/lmeR_spline_results.csv") %>% select(-1)
-```
-
-```{r}
-# slope models with chrX
-lmeR_spline_int_full <- fread("/Users/ryan_summers/Library/Mobile\ Documents/com~apple~CloudDocs/GitHub/teddy-dnam-analysis/results/lmeR_spline_int_res.csv") %>% select(-1)
-```
-
-```{r}
-# spline models w/out chrX
-lmeR_spline_int_slope_res <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_summary.qs",nthreads=12)
-
-# controls & intercept only w/out chrX
-spline_int_results <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_summary_ctrls.qs",nthreads=12)
-
-# icloud
-lmeR_spline_int_res <- qread("/Users/ryan_summers/Library/Mobile\ Documents/com~apple~CloudDocs/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_summary_inty.qs",nthreads=6)
-
-lmeR_spline_int_slope_res <- qread("/Users/ryan_summers/Library/Mobile\ Documents/com~apple~CloudDocs/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_summary.qs",nthreads=6)
-
-```
-
-Controls only:
-```{r}
-# splines intercepts 
-spline_int_BLUPs_full <-qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_blup_ctrls_full.qs", nthreads=12)
-
-# spline summary results
-spline_summary_BLUPs <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_summary_ctrls.qs",nthreads=12)
-```
-
-Controls only w/ sub-trajectories removed from GMM step:
-```{r}
-# splines intercepts 
-spline_int_BLUPs <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_blup_ctrls.qs",nthreads=12)
-
-# spline summary results
-spline_summary_BLUPs <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_summary_ctrls.qs",nthreads=12)
-
-# prediction stats
-spline_pred_stats <- qread("/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/secondary/lmeR_spline_RE_predictions_ctrls.qs",nthreads=12)
-```
-
-```{r}
-spline_summary_BLUPs[CpG == "cg21960840", 
-                 .(CpG, nObs, aic, is_singular)]
-```
-
-```{r}
-lmeR_spline_summary[CpG == "cg06638795",
-                     .SD, # SD = subset data for data.table formates
-                     .SDcols = c("CpG", "nObs", "aic", "is_singular",pred_cols)]
-lmeR_spline_int_res[CpG == "cg06638795",
-                     .SD, # SD = subset data for data.table formates
-                     .SDcols = c("CpG", "nObs", "aic", "is_singular",pred_cols)]
-```
-
-```{r}
-suppressWarnings( # Warnings relate to missing values which I am aware of
-for (i in cpg_diff$CpG[1:50]){
-  p <- getSpagPlot_big(
-  CpG = i,
-  mvals_bm = matrix.clean,
-  pheno = pheno_complete,
-  anno = anno,
-  value_type = "beta", #beta or m
-  y_limits = c(0,1),
-  age_unit = "years",
-  probe_ids = probe_ids,
-  sample_ids = sample_ids)
-  print(p)
-})
-```
-
-
-```{r}
-lmeR_spline_summary %>% group_by(is_singular) %>% summarise(n = n())
-lmeR_spline_int_res %>% group_by(is_singular) %>% summarise(n = n())
-```
-
 
 #### Contrasts Error
 
@@ -1860,8 +2020,6 @@ change CpGs
 
 how much $R^2$ drops when removing each variable
 ```{r}
-library(performance)
-
 full_r2 <- r2(m1)$R2_marginal
 
 drop_var <- function(var) {
@@ -1922,21 +2080,6 @@ cpgs_to_test2 <- lmeR_MAD_results %>%
 ```
 
 
-```{r}
-lmeR_MAD_results %>%
-  mutate(
-    baseline_beta = m2beta(fixed_intercept),
-    end_m = fixed_intercept + fixed_slope * time_range,
-    end_beta = m2beta(end_m),
-    delta_beta = end_beta - baseline_beta) %>% 
-  select(delta_beta) %>% 
-  summary()
-
-cpgs_to_test2 %>% 
-  group_by(group) %>% 
-  summarise(n = n())
-```
-
 Get the empirical betas for a specific CpG at specific age (time)
 ```{r}
 # example CpG
@@ -1972,76 +2115,6 @@ pheno %>%
 ```
 
 
-```{r}
-# model diagnostic differences between LMM w/ random int/slope vs
-# model with nonlinear slope and linear random int/slope
-
-aic_comp <- lmeR_MAD_results %>% # linear age
-  select(CpG, aic_mad = aic, bic_mad = bic) %>%
-  inner_join(
-    lmeR_spline_int_res %>% # non-linear age
-      select(CpG, aic_spline = aic, bic_spline = bic),
-    by = "CpG") %>%
-  mutate(
-    aic_diff = aic_mad - aic_spline,
-    bic_diff = bic_mad - bic_spline) %>% 
-  column_to_rownames(var = "CpG")
-  
-```
-
-### Clustering Features
-
-```{r}
-test_res <- lmeR_spline_int_res[lmeR_spline_int_res$CpG %in% cpgs_to_test2$CpG,]
-
-# extract trajectory matrix
-pred_cols <- grep("^pred_age_", names(test_res), value = TRUE)
-# extract other features of interest
-ot_cols <- c("fixed_intercept", "se_intercept", "t_intercept",
-             "ns1_se", "ns2_se", "ns3_se", "ns1_t", "ns2_t", "ns3_t",
-             "var.rand.int", "var.rand.slope", "var.resid")
-
-features <- c(pred_cols, ot_cols)
-
-X.traj <- as.matrix(test_res[, ..pred_cols])
-rownames(X.traj) <- test_res$CpG
-```
-
-
-Extract and sort projected curves
-```{r}
-# extract numeric ages
-ages <- as.numeric(sub("pred_age_", "", pred_cols))
-
-# order columns by age
-ord <- order(ages)
-pred_cols <- pred_cols[ord]
-ages <- ages[ord]
-```
-
-
-```{r}
-# combine other features into clustering algo
-common_cpgs <- Reduce(intersect, list(rownames(X.traj),rownames(aic_comp)))
-
-traj_mat_test <- cbind(
-  X.traj[common_cpgs, , drop = F],
-  # cpgs_to_test2[cpgs_to_test2$CpG %in% common_cpgs, 
-  #               c("baseline_beta", "delta_beta")],
-  aic_comp[common_cpgs, c("aic_diff", "bic_diff"), drop = F])
-```
-
-
-```{r}
-# !colnames(traj_mat_test) %in% c("pred_age_3.724", "pred_age_6.190")
-# scale
-traj_scaled <- scale_rows(traj_mat_test[, 1:12])
-X_scaled <- scale(X.traj)
-
-# need column wide scaling for non-trajectory features
-#ot_scaled <- scale()
-```
-
 ### PCA
 
 ```{r}
@@ -2061,70 +2134,6 @@ pca_test$rotation[,2] %>% .[order(abs(.), decreasing = T)] %>%
 
 pca_test$rotation[,3] %>% .[order(abs(.), decreasing = T)] %>% 
   enframe(name = "variable", value = "loading")
-
-```
-
-
-### HC
-```{r}
-# hierarchical clustering
-dist_mat <- dist(X_scaled)
-hc <- hclust(dist_mat, method = "ward.D2")
-pred <- cutree(hc, k = 3)
-cpgs_to_test2$pred <- pred
-
-# correlation distance
-cor_dist <- as.dist(1 - cor(t(X_scaled), use = "pairwise.complete.obs"))
-hc <- hclust(cor_dist, method = "average")
-pred <- cutree(hc, k = 3)
-cpgs_to_test2$pred <- pred
-```
-
-
-### K-Means
-
-```{r}
-set.seed(2522)
-km <- kmeans(traj_scaled, centers = 3, nstart = 50)
-```
-
-CpG1 = (3.6, 3.2, 2.8)
-CpG2 = (2.3, 2.3, 2.2)
-kmeans clusters based on distance between these row vectors across pred_**
-
-```{r}
-pred <- km$cluster[match(cpgs_to_test2$CpG, 
-                         rownames(X_scaled))] #rownames obj needs to change
-cpgs_to_test2$pred <- pred
-```
-
-
-```{r}
-adjustedRandIndex(cpgs_to_test2$group, pred)
-cbind(cpgs_to_test2$group, pred)
-```
-
-```{r}
-# summarize K-means classification
-km_class <- data.frame(
-  CpG = cpgs_to_test2$CpG,
-  og_group = cpgs_to_test2$group,
-  pred_cluster = pred,
-  pred_group = case_when(
-    pred == 2 ~ "increasing", # **PREDICTED LABELS CHANGE EACH KM RUN**
-    pred == 3 ~ "decreasing",
-    pred == 1 ~ "flat"
-  )) %>%
-  mutate(is_correct = case_when(
-    og_group == "decreasing" & pred_cluster == 3 ~ TRUE,
-    og_group == "increasing" & pred_cluster == 2 ~ TRUE,
-    og_group == "flat" & pred_cluster == 1 ~ TRUE,
-    TRUE ~ FALSE
-  )) %>% 
-  remove_rownames()
-
-# misclassified classes
-cpg_wrg <- km_class %>% filter(!is_correct) %>% pull(CpG)
 
 ```
 
@@ -2153,7 +2162,7 @@ getSpagPlot_big(
 ```{r}
 # using only latent curves
 suppressWarnings( # Warnings relate to missing values which I am aware of
-for (i in cpg_diff$CpG[1:50]){
+for (i in top_gap_cpgs){
   p <- getSpagPlot_big(
   CpG = i,
   mvals_bm = matrix.clean,
@@ -2167,95 +2176,20 @@ for (i in cpg_diff$CpG[1:50]){
   print(p)
 })
 
-lmeR_spline_int_res[lmeR_spline_int_res$nObs==730,]
 ```
 
-
-```{r}
-# using only latent curves
-suppressWarnings( # Warnings relate to missing values which I am aware of
-for (i in cpg_wrg){
-  p <- getSpagPlot_big(
-  CpG = i,
-  mvals_bm = matrix.clean,
-  pheno = pheno_complete,
-  anno = anno,
-  value_type = "beta", #beta or m
-  y_limits = c(0,1),
-  probe_ids = probe_ids,
-  sample_ids = sample_ids)
-  print(p)
-})
-
-# library(patchwork)
-# plots <- lapply(cpg_wrg, function(i) {
-#   getSpagPlot_big(
-#     CpG = i,
-#     mvals_bm = matrix.clean,
-#     pheno = pheno_complete,
-#     anno = anno,
-#     value_type = "m", #beta or m
-#     #y_limits = c(0,1),
-#     probe_ids = probe_ids,
-#     sample_ids = sample_ids)
-#   })
-# 
-# wrap_plots(plots, ncol = 2)
-
-```
-
-```{r}
-# data table method
-# cpgs_to_test2[CpG %in% cpg_wrg,
-#               .(CpG, nObs, fixed_intercept, fixed_slope, baseline_beta, 
-#                    delta_beta, group,is_singular)]
-
-# Turn off scientific notation
-options(scipen = 999)
-cpgs_to_test2 %>%
-  filter(CpG %in% cpg_wrg) %>%
-  left_join(km_class %>% select(CpG, pred_group), by = "CpG") %>%
-  select(CpG, nObs, fixed_slope, baseline_beta, 
-         delta_beta, group, pred_group, var.rand.slope,is_singular) %>% 
-    mutate(across(c(fixed_slope, delta_beta, var.rand.slope), 
-                ~ round(., 6))) 
-# Reset to default when done
-options(scipen = 0)
-
-```
-
-### Review mislabeled CpGs
-
-```{r}
-# Data.Table method
-# cpgs_to_test2[CpG %in% c("cg19159092", "cg01729262"),
-#               .(CpG, nObs, fixed_intercept, fixed_slope, baseline_beta, 
-#                    delta_beta, group,is_singular)]
-
-# Turn off scientific notation
-options(scipen = 999)
-cpgs_to_test2 %>%
-  filter(CpG %in% c("cg19159092", "cg01729262")) %>%
-  #left_join(km_class %>% select(CpG, pred_group), by = "CpG") %>%
-  select(CpG, nObs, fixed_slope, baseline_beta, 
-         delta_beta, group, var.rand.slope,is_singular) %>% 
-    mutate(across(c(fixed_slope, delta_beta, var.rand.slope), 
-                ~ round(., 6))) 
-# Reset to default when done
-options(scipen = 0)
-```
 
 ### Plot Fitted Trajectories from Spline Model
 
 ```{r}
 # two trajectory sites: cg03013609 ; cg20239921
 # well behaved sites: cg23776628 ; 
-cpg_i <- "cg12025418" 
+cpg_i <- "cg01250703" 
 
 pred_traj_plot <- make_spline_pred_df(
   CpG = cpg_i,
-  fitted_model = lmeR_spline_int_full, #lmeR_spline_int_slope_res
-  value_type = "beta")
+  fitted_model = spline_summary_BLUPs, 
+  value_type = "m")
 
 getSpagPlot_big(
   CpG = cpg_i,
@@ -2271,271 +2205,6 @@ getSpagPlot_big(
 
 ```
 
-
-### Derivatives from Predicted Trajectories
- 
-$$
-D1_k = \frac{\hat{M}(a_{k+1}) - \hat{M}(a_k)} {a_{k+1} - a_k}
-$$
-
-```{r}
-# change between time points
-# age grid is uneven so we need to divide by age gap
-# X.traj = predicted trajectory matrix
-# rows = CpGs, columns = predicted ages
-
-# extract trajectory column names
-pred_cols <- grep("^pred_age_", names(spline_int_results), value = TRUE)
-# extract numeric ages
-ages <- as.numeric(sub("pred_age_", "", pred_cols))
-
-# order columns by age
-ord <- order(ages)
-pred_cols <- pred_cols[ord]
-ages <- ages[ord]
-
-# predicted M-value matrix: rows = CpGs, columns = ages
-Mhat <- as.matrix(spline_int_results[, ..pred_cols])
-rownames(Mhat) <- spline_int_results$CpG
-
-# identify CpGs with complete predicted trajectories
-# CpGs with contrast error identified earlier - e.g. class misbalance
-good_cpgs <- rowSums(is.na(Mhat)) == 0
-Mhat <- Mhat[good_cpgs, , drop = FALSE]
-
-# convert predicted M-values to Beta-values
-Betahat <- m2beta(Mhat)
-rm(Mhat) # don't need Mhat matrix
-
-# numerical derivative dBeta/dage between adjacent ages
-dBeta_dage <- t(apply(Betahat, 1, function(x) {
-  diff(x) / diff(ages)
-  }))
-
-# name derivative columns by age interval
-colnames(dBeta_dage) <- paste0(
-  "dBeta_dage_",
-  round(ages[-length(ages)], 3),
-  "_to_",
-  round(ages[-1], 3))
-
-```
-
-#### Identifying Transient Trajectories (Change point analysis)
-
-
-Filtering translation:
-predicted methylation changes by less than 1 percentage point across the full age range.
-no local interval changes faster than 0.5 percentage points per year.
-
-> dBeta_dage_0.203_to_0.501 = estimated change in predicted Beta-value per 1 year of age between age 0.994 and 1.500
->
-> Predicted methylation Beta-value increases by about 0.00179 per year over that
-age interval for cg26928153.
->
-> With splines, there is no single age slope. Instead, the slope changes depending
-on where you are along the age trajectory. This derivative table gives the local 
-rate of change between adjacent ages.
->
-> We are taking differences between adjacent predicted methylation values along
-the fitted trajectory and dividing by the age interval to estimate the local 
-rate of methylation change. This is an approximation to dBeta/dage - 
-the local rate of methylation change along the spline trajectory.
-
-Tells us:
-* how M-scale slopes translate to Beta-scale slopes
-* why the Beta-scale slope depends on the current Beta value
-
-#### K-means on "non-flat" CpGs
-
-Parallelization
-
-```{r}
-set.seed(2522)
-Ks <- 2:7
-# scale trajectories
-traj_scaled <- scale_rows(Betahat.red)
-
-# sample CpGs for silhouette evaluation
-sil_idx <- sample(seq_len(nrow(traj_scaled)), 10000)
-traj_sil <- traj_scaled[sil_idx, , drop = FALSE]
-
-plan(multisession, workers = 12)
-
-t0 <- Sys.time() # Start time
-
-sil_vals <- future_sapply(Ks, function(k) {
-  set.seed(2522 + k)
-  fit <- kmeans(
-    traj_scaled, 
-    centers = k, 
-    nstart = 25, 
-    iter.max = 1000,
-    algorithm = "Hartigan-Wong")
-  # replicate a few times
-  sil_rep_vals <- replicate(5, { # do 5 times to start
-    idx <- sample(seq_len(nrow(traj_scaled)), 10000) # test 10k CpGs
-    sil <- silhouette(fit$cluster[idx], dist(traj_scaled[idx, , drop = F]))
-    mean(sil[, 3])
-    })
-  mean(sil_rep_vals)}, 
-  future.seed = T)
-
-plan(sequential) # release the cpu workers
-
-t1 <- Sys.time() # End time
-message("Silhouette runtime: ", 
-        round(as.numeric(difftime(t1, t0, units = "mins")), 2), 
-        " minutes")
-
-(best_k <- Ks[which.max(sil_vals)])
-
-plot(
-  Ks, sil_vals,
-  type = "b",
-  pch = 19,
-  xlab = "Number of Clusters (k)",
-  ylab = "Average Silhouette Width",
-  main = "Optimal k by Sampled Silhouette Score")
-
-abline(v = best_k, col = "red", lty = 2)
-
-```
-
-```{r}
-kmeans_grid <- function(x, k_values = 3:12, nstart = 20, iter.max = 100) {
-  out <- future_lapply(k_values, function(k) {
-    message("Running kmeans for k = ", k)
-    km <- kmeans(x, centers = k, nstart = nstart, iter.max = iter.max,
-                 algorithm = "Hartigan-Wong")
-    list(
-      k = k,
-      km = km,
-      tot_withinss = km$tot.withinss,
-      betweenss = km$betweenss,
-      totss = km$totss,
-      ratio = km$betweenss / km$totss)
-  }, future.seed = TRUE)
-  
-  names(out) <- paste0("k", k_values)
-  out
-}
-
-# sum of squares (SS) method
-km_grid <- kmeans_grid(
-  x = traj_scaled,
-  k_values = 2:10,
-  nstart = 25,
-  iter.max = 1000)
-
-km_summary <- rbindlist(
-  lapply(km_grid, function(x) {
-    data.table(
-      k = x$k,
-      tot_withinss = x$tot_withinss,
-      betweenss = x$betweenss,
-      totss = x$totss,
-      ratio = x$ratio)
-  }))
-
-print(km_summary)
-```
-
-
-
-```{r}
-# run Kmeans
-set.seed(2522)
-km <- kmeans(traj_scaled, centers = best_k, nstart = 50)
-
-pred <- km$cluster
-pred_vector <- pred[match(rownames(Betahat.red), names(pred))]
-table(km$cluster)
-
-# cluster_df <- data.frame(
-#   CpG = rownames(Betahat.red),
-#   pred = pred_vec)
-```
-
-```{r}
-pca <- prcomp(traj_scaled)
-summary(pca)
-
-set.seed(2522)
-plot_idx <- sample(seq_len(nrow(traj_scaled)),10000)
-plot(
-  pca$x[plot_idx, 1],
-  pca$x[plot_idx, 2],
-  col = km$cluster[plot_idx],
-  pch = 16,
-  cex = 0.5)
-
-```
-
-```{r}
-cluster_means <- rowsum(traj_scaled, group = km$cluster) / 
-  as.vector(table(km$cluster))
-
-matplot(
-  ages,
-  t(cluster_means),
-  type = "l",
-  lty = 1,
-  lwd = 3,
-  xlab = "Age",
-  ylab = "Mean Beta",
-  main = "Cluster-average methylation trajectories")
-
-legend(
-  "topright",
-  legend = paste("Cluster", rownames(cluster_means)),
-  col = 1:nrow(cluster_means),
-  lty = 1,
-  lwd = 3)
-```
-
-
-```{r}
-pca$rotation[,1] %>% .[order(abs(.), decreasing = T)] %>% 
-  enframe(name = "variable", value = "loading")
-
-pca$rotation[,2] %>% .[order(abs(.), decreasing = T)] %>% 
-  enframe(name = "variable", value = "loading")
-
-```
-
-
-```{r}
-plot(
-  ages,
-  pca$rotation[,1],
-  type = "b",
-  pch = 19,
-  xlab = "Age",
-  ylab = "PC1 loading",
-  main = "PC1 trajectory pattern")
-
-plot(
-  ages,
-  pca$rotation[,2],
-  type = "b",
-  pch = 19,
-  xlab = "Age",
-  ylab = "PC2 loading",
-  main = "PC2 trajectory pattern")
-```
-
-
-ARI measues how well pairs of points are grouped
-* compares predicted clusters with true labels
-	*	1.0 → perfect agreement (clusters match exactly)
-	*	0.0 → random clustering (no better than chance)
-	*	< 0 → worse than random
-	
-	
-* "Cluster A shows increasing methylated/unmethylated signal with age”
-* “Cluster B shows decreasing relative methylation levels”
-* “Cluster C shows stable trajectories”
 
 ## GMM
 
@@ -2662,21 +2331,126 @@ gmm_results <- data.table::rbindlist(gmm_results, fill = TRUE)
 # qsave(gmm_results, "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/gmm_results.qs", nthreads = 12)
 
 # GMM results w/chrX removed and controls only
-gmm_results <- qread(
+gmm_M_full <- qread(
   "/Users/ryan_summers/GitHub/teddy-dnam-analysis/results/gmm_filtered_results.qs", 
   nthreads = 12)
 
+gmm_M_red <- qread("/Users/ryan_summers/Desktop/gmm_results_Mvalue.qs", nthreads = 12)
+
+gmm_beta_red <- qread("/Users/ryan_summers/Desktop/gmm_filtered_results.qs", nthreads = 12)
+
+gmm_subj_means <- qread("/Users/ryan_summers/Desktop/gmm_subjmean_results.qs", nthreads = 12)
+
+# zero
+#gmm_results |> group_by(call_type, best_G) |> summarise(n=n())
 ```
 
 ```{r}
-gmm_results |> group_by(best_G) |> summarise(n=n())
-unimodal_cpgs <- gmm_results[gmm_results$best_G==1, "CpG"]
-bimodal_cpgs <- gmm_results[gmm_results$best_G==2, "CpG"]
-trimodal_cpgs <- gmm_results[gmm_results$best_G==3, "CpG"]
-# unimodal_cpgs <- qsave(unimodal_cpgs, 
-#       "/Users/ryan_summers/GitHub/teddy-dnam-analysis/data/processed/unimodal_cpgs.qs", 
-#       preset = "fast", nthreads = 12)
+modal_names <- c("unimodal", "bimodal", "trimodal")
+
+M_cpgs <- setNames(
+  lapply(1:3, function(g) {gmm_M_full$CpG[gmm_M_full$best_G == g]}),
+  modal_names)
+
+M_red_cpgs <- setNames(
+  lapply(1:3, function(g) {gmm_M_red$CpG[gmm_M_red$best_G == g]}),
+  modal_names)
+
+beta_cpgs <- setNames(
+  lapply(1:3, function(g) {gmm_beta_red$CpG[gmm_beta_red$best_G == g]}),
+  modal_names)
+
+subj_cpgs <- setNames(
+  lapply(1:3, function(g) {gmm_subj_means$CpG[gmm_subj_means$best_G == g]}),
+  modal_names)
 ```
+
+
+```{r}
+only_in_subj_means <- setdiff(subj_cpgs$bimodal, beta_cpgs$bimodal)
+only_in_beta_fit <- setdiff(beta_cpgs$bimodal, subj_cpgs$bimodal)
+only_in_M_fit <- setdiff(M_red_cpgs$bimodal, M_cpgs$bimodal)
+
+length(setdiff(M_red_cpgs$unimodal, subj_cpgs$unimodal))
+length(setdiff(M_red_cpgs$bimodal, subj_cpgs$bimodal))
+length(setdiff(M_red_cpgs$trimodal, subj_cpgs$trimodal))
+```
+
+
+
+Compare GMM using subject-level means vs random intercept input
+```{r}
+library(mclust)
+
+compare_one_cpg <- function(cpg_id, subj_mean_beta_mat, intercept_mat,
+                             raw_summary, int_summary) {
+
+  ## pull the raw-means result row and the intercept-based result row for this CpG
+  raw_row <- raw_summary[CpG == cpg_id]
+  int_row <- int_summary[CpG == cpg_id]
+
+  ## skip CpGs that failed/were degenerate in either fit
+  if (nrow(raw_row) == 0 || nrow(int_row) == 0 ||
+      is.na(raw_row$best_G) || is.na(int_row$best_G) ||
+      raw_row$call_type != "fitted" || int_row$call_type != "fitted") {
+    return(data.table(CpG = cpg_id, G_raw = raw_row$best_G, G_int = int_row$best_G,
+                       ari = NA_real_, agree_rate = NA_real_, note = "skipped_non_fitted"))
+  }
+
+  ## refit both (cheap for a sampled subset) to recover classifications
+  x_raw <- as.numeric(subj_mean_beta_mat[cpg_id, ])
+  x_int <- as.numeric(intercept_mat[cpg_id, ])
+
+  fit_raw <- tryCatch(Mclust(x_raw, G = raw_row$best_G, verbose = FALSE), error = function(e) NULL)
+  fit_int <- tryCatch(Mclust(x_int, G = int_row$best_G, verbose = FALSE), error = function(e) NULL)
+
+  if (is.null(fit_raw) || is.null(fit_int)) {
+    return(data.table(CpG = cpg_id, G_raw = raw_row$best_G, G_int = int_row$best_G,
+                       ari = NA_real_, agree_rate = NA_real_, note = "refit_failed"))
+  }
+
+  ## if either fit collapsed to G=1, cluster comparison is degenerate/trivial -- flag rather than force
+  if (fit_raw$G == 1 || fit_int$G == 1) {
+    return(data.table(CpG = cpg_id, G_raw = fit_raw$G, G_int = fit_int$G,
+                       ari = NA_real_, agree_rate = NA_real_, note = "G1_degenerate"))
+  }
+
+  ## align cluster labels by mean proximity
+  means_raw <- fit_raw$parameters$mean
+  means_int <- fit_int$parameters$mean
+  label_map <- sapply(means_int, function(m) which.min(abs(means_raw - m)))
+
+  cluster_int_aligned <- label_map[fit_int$classification]
+  cluster_raw <- fit_raw$classification
+
+  data.table(
+    CpG = cpg_id,
+    G_raw = fit_raw$G,
+    G_int = fit_int$G,
+    ari = adjustedRandIndex(cluster_raw, cluster_int_aligned),
+    agree_rate = mean(cluster_raw == cluster_int_aligned),
+    note = "compared"
+  )
+}
+```
+
+```{r}
+set.seed(1)
+sample_cpgs <- sample(gmm_subj_means[call_type == "fitted", CpG], 200)
+
+comparison_results <- rbindlist(lapply(sample_cpgs, function(cg) {
+  compare_one_cpg(cg, subj_mean_beta_mat, spline_int_BLUPs,
+                   raw_summary = gmm_subj_means, int_summary = gmm_results2)
+}))
+
+## summarize
+table(comparison_results$note)
+table(comparison_results$G_raw, comparison_results$G_int)
+
+comparison_results[note == "compared", summary(ari)]
+comparison_results[note == "compared", hist(ari, breaks = 30)]
+```
+
 
 Filtering uncertainty out of GMM results
 ```{r}
@@ -2691,13 +2465,6 @@ gmm_grp1_cpgs <- gmm_results[gmm_results$best_G==1, "CpG"]
 ```
 
 
-```{r}
-gmm_results |> filter(call_type=="zero_variance")
-```
-
-```{r}
-table(gmm_results_filtered$call_type)
-```
 
 Calculate SDs for intercept BLUPs to determine CpG site that have low variability
 between subjects
@@ -2717,60 +2484,14 @@ summary(blup_sd)
 
 "CpGs with negligible inter-individual variability in random-intercept BLUPs, for which Gaussian mixture modeling was not applicable"
 
-```{r}
-summary(blup_sd[blup_sd < 1e-6])
-quantile(blup_sd[blup_sd < 1e-6], probs = c(0, .25, .5, .75, 1))
-```
-
-```{r}
-spline_summary_BLUPs[spline_summary_BLUPs$CpG=="cg04172501",]
-```
-
-
-```{r}
-# tri-CpGs c(cg10197305, cg23692511, cg14531093)
-getSpagPlot_big(
-  CpG = "cg04172501",
-  mvals_bm = matrix.clean,
-  value_type = "beta",
-  #y_limits = c(0.05, .2),
-  age_unit = "years",
-  pheno = pheno_complete,
-  anno = anno,
-  probe_ids = probe_ids,
-  sample_ids = sample_ids,
-  #group_col = "CaseControl",
-  #facet_by_group = T,
-  legend = "bottom")
-
-cpg_nas <- gmm_results[gmm_results$call_type=="zero_variance",]
-grp1_gmm <- gmm_results[gmm_results$best_G==1, ]
-for (i in sample(grp1_gmm$CpG, 50)) {
-  p <- getSpagPlot_big(
-    CpG = i,
-    mvals_bm = matrix.clean,
-    value_type = "beta",
-    y_limits = c(0, 1),
-    age_unit = "years",
-    pheno = pheno_complete,
-    anno = anno,
-    probe_ids = probe_ids,
-    sample_ids = sample_ids,
-    #group_col = "HLA_Category",
-    #facet_by_group = T,
-    legend = "bottom")
-  print(p)
-  }
-```
-
 "The NAs identified by GMM (if (sd(x) < 1e-8)) appear to have really tight
 starting methylation values.
 
 ### GMM Visualized
 
 ```{r}
-tri_ord <- trimodal_cpgs %>% arrange(mean_uncertainty)
-for (i in tri_ord$CpG[1:50]) {
+
+for (i in sample(only_in_beta_fit, 50)) {
   p <- getSpagPlot_big(
     CpG = i,
     mvals_bm = matrix.clean,
@@ -2790,12 +2511,20 @@ for (i in tri_ord$CpG[1:50]) {
 ```
 
 ```{r}
+gmm_M_full[gmm_M_full$CpG=="cg21148594"]
+gmm_M_red[gmm_M_red$CpG=="cg21148594"]
+gmm_beta_red[gmm_beta_red$CpG=="cg21148594"]
+gmm_subj_means[gmm_subj_means$CpG=="cg21148594"]
+```
+
+
+```{r}
 # tri-CpGs c(cg10197305, cg23692511, cg14531093)
 getSpagPlot_big(
-  CpG = "cg04172501",
+  CpG = "cg21148594",
   mvals_bm = matrix.clean,
   value_type = "beta",
-  #y_limits = c(0.05, .2),
+  #y_limits = c(0, .2),
   age_unit = "years",
   pheno = pheno_complete,
   anno = anno,
@@ -2809,26 +2538,13 @@ getSpagPlot_big(
 View histogram of GMM. ideally there should be multiple peaks (2 or 3)
 
 ```{r}
+int_cols <- grep("^intercept_", names(spline_int_BLUPs_M), value = TRUE)
 plot_gmm_hist(
-  cpg = "cg01014490", 
-  spline_intercepts=spline_int_BLUPs, # intercepts from spline model
+  cpg = "cg21148594", 
+  spline_intercepts=spline_int_BLUPs_M, # intercepts from spline model
   int_cols, # intercept column names
   legend_pos = "topleft",
   show_empirical = FALSE)
-```
-
-
-```{r}
-for (i in tri_ord$CpG[1:50]) {
-  p <- plot_gmm_hist(
-  cpg = i, 
-  lmeR_spline_int_BLUP[CpG==i,], # intercepts from spline model
-  int_cols, # intercept column names
-  legend_pos = "topleft",
-  show_empirical = FALSE
-  )
-  print(p)
-}
 ```
 
 
@@ -2838,6 +2554,28 @@ for (i in tri_ord$CpG[1:50]) {
 
 
 ## Transient/Change point Analysis
+
+$$
+D_k = \frac{\hat{M}(a_{k+1}) - \hat{M}(a_k)} {a_{k+1} - a_k}
+$$
+
+Filtering translation:
+predicted methylation changes by less than 1 percentage point across the full age range.
+no local interval changes faster than 0.5 percentage points per year.
+
+> dBeta_dage_0.203_to_0.501 = estimated change in predicted Beta-value per 1 year of age between age 0.994 and 1.500
+>
+> Predicted methylation Beta-value increases by about 0.00179 per year over that
+age interval for cg26928153.
+>
+> With splines, there is no single age slope. Instead, the slope changes depending
+on where you are along the age trajectory. This derivative table gives the local 
+rate of change between adjacent ages.
+>
+> We are taking differences between adjacent predicted methylation values along
+the fitted trajectory and dividing by the age interval to estimate the local 
+rate of methylation change. This is an approximation to dBeta/dage - 
+the local rate of methylation change along the spline trajectory.
 
 ```{r}
 # change between time points
@@ -2908,6 +2646,8 @@ hist(m_range, breaks = 100,
      main = "Predicted M-value trajectory range",
      xlab = "Maximum minus minimum predicted M-value")
 
+summary(m_range)
+
 hist(mean_abs_m_slope, breaks = 100,
   main = "Mean absolute M-value slope",
   xlab = "M-value units per year")
@@ -2940,7 +2680,18 @@ plot(traj_range_m, monotonicity_gap, pch = ".",
      xlab = "Range (M-units)", ylab = "TV - Range (monotonicity gap)")
 ```
 
+```{r}
+top_gap_cpgs <- names(sort(monotonicity_gap, decreasing = TRUE))[1:12]
+idx <- match(top_gap_cpgs, rownames(Mhat_traj))
 
+par(mfrow = c(3,4))
+for (i in idx) {
+  plot(ages, Mhat_traj[i, ], type = "l",
+       main = rownames(Mhat_traj)[i], xlab = "age", ylab = "M-value")
+}
+```
+
+Both traj_range_beta (max − min) and total_abs_beta_change, for a strictly monotonic curve, are mathematically equal (total variation = endpoint-to-endpoint range). For a non-monotonic curve (rise-then-fall, i.e., a transient bump), total variation will exceed the range, because it separately sums the "up" leg and the "down" leg rather than netting them out because of the absolute calculation. In other words, any change whatsoever is summed up into the slope change.
 
 Segmented Analysis to determine a breakpoint for "early" vs "late" split
 ```{r}
@@ -3011,26 +2762,6 @@ What segmented() is actually telling you:
 davies.test(fit_lin, seg.Z = ~interval_mid)
 ```
 
-```{r}
-## Range of predicted M-values across the whole trajectory, per CpG
-traj_range <- apply(traj_matrix, 1, function(x) max(x) - min(x))
-
-## Or: total variation of the derivative-integrated curve (equivalent-ish, more robust to monotonic vs non-monotonic shapes)
-total_abs_change <- rowSums(
-  abs(dM_dage_fine) * matrix(fine_interval_width,
-                             nrow = nrow(dM_dage_fine),
-                             ncol = length(fine_interval_width), byrow = T))
-
-hist(traj_range, breaks = 100)
-summary(total_abs_change)
-hist(total_abs_change, breaks=100)
-
-hist(log10(total_abs_change), breaks = 100,
-     main = "log10(total absolute M-value change)")
-```
-
-"With a smooth unimodal distribution like this, wherever you draw a percentile line, you're bisecting a continuum at a point with no distributional justification — the CpGs just below your cutoff and just above it are barely distinguishable from each other. That's not "slightly less rigorous," it's actually undefined what you're separating. Any threshold here needs to be justified by something external to this distribution — either a statistical criterion or a biological benchmark — not by the shape of the histogram itself.
-
 
 ```{r}
 # total absolute change in beta
@@ -3069,37 +2800,472 @@ par(mfrow = c(1, 1))  # Reset layout
 
 Determine % of CpG sites with
 ```{r}
-thresholds <- c(0.02, 0.05, 0.07, 0.10, 0.15)
+thresholds <- c(0.02, 0.05, 0.10, 0.15, 0.2) #beta
+# total_abs_beta_change & total_abs_change_m
 frac_above <- sapply(thresholds, function(x) mean(total_abs_beta_change > x))
-names(frac_above) <- paste0(">", thresholds*100, "%")
+names(frac_above) <- paste0(">", thresholds*100, "%") # for Beta
 round(frac_above,3)
 ```
 
 "CpGs were retained for functional PCA if their fitted β-value trajectory spanned ≥3% across the study period. This threshold yielded a dynamic fraction (~X%) comparable to the ~14% of CpGs identified as significantly age-associated in an overlapping early-childhood window by Pérez et al. (2019)." That's a much stronger justification than an internally-derived percentile, since it's anchored to an external, independent estimate of what fraction of the methylome is genuinely dynamic in this age range — and now you have the actual number to back it up rather than just an analogy.
-
-You compute both traj_range_beta (max − min) and total_abs_beta_change. For a strictly monotonic curve, these are mathematically equal (total variation = endpoint-to-endpoint range). For a non-monotonic curve (rise-then-fall, i.e., a transient bump), total variation will exceed the range, because it separately sums the "up" leg and the "down" leg rather than netting them out.
 
 
 ## Flat Filtering
 
 Genomic inflation???***
 ```{r}
-spline_summary_BLUPs |> 
-  filter(age_omnibus_p < 0.05) |> 
-  summarise(n = n())
+## flag flats as "small slope AND not significant" ---
+spline_summary_BLUPs[, is_flat := mean_abs_m_slope <= 0.015 & age_omnibus_p >= 0.05]
+
+## Non-flat CpGs to carry forward into fPCA
+keep_cpgs <- spline_summary_BLUPs[is_flat == FALSE, CpG]
+
+## Just the flats, if you want to inspect/count them
+flat_cpgs <- spline_summary_BLUPs[is_flat == TRUE, CpG]
+length(flat_cpgs); length(keep_cpgs)
 ```
+
+```{r}
+## adjust p-values first -- raw p<0.05 across hundreds of thousands of CpGs
+## will produce a large number of false positives (this is exactly why
+## Perez/Mulder/Urdinguio all used FDR or Bonferroni correction, not raw p)
+spline_summary_BLUPs[, omnibus_padj := p.adjust(age_omnibus_p, method = "BH")]
+
+spline_summary_BLUPs[, FDR_keeps := omnibus_padj < 0.05 & mean_abs_m_slope > 0.015]
+flat_fdr_cpgs <- spline_summary_BLUPs[FDR_keeps == F, CpG]
+
+sum(spline_summary_BLUPs$FDR_keeps)
+mean(spline_summary_BLUPs$FDR_keeps)
+```
+
+
+```{r}
+# per-CpG residual SD (within-subject noise) and random-effect SD (between-subject)
+residual_sd   <- spline_summary_BLUPs$var.resid # within
+between_sd    <- spline_summary_BLUPs$var.rand.intercept  # random intercept SD
+
+# signal-to-noise ratio, directly analogous to Refn et al.'s
+# "ratio between variance and rate of change" (median ~0.9 in their adult data)
+snr_ratio <- traj_range_m / residual_sd
+
+## floor approach - prevents near-zero residual_sd from inflating the ratio
+epsilon <- quantile(residual_sd, 0.05, na.rm = TRUE)  # small stabilizing constant
+snr_ratio_stable <- traj_range_m / (residual_sd + epsilon)
+
+spline_summary_BLUPs[, SNR_keeps := 
+                       omnibus_padj < 0.05 & 
+                       mean_abs_m_slope > 0.015 & 
+                       snr_ratio_stable > 0.5]
+
+flat_fdr_snr_cpgs <- spline_summary_BLUPs[SNR_keeps == F, CpG]
+cpgs_to_keep <- spline_summary_BLUPs[SNR_keeps == T, CpG]
+
+cat("Number of CpGs removed with FDR > 0.05, Mean abs(M-slope) < 0.015, and SNR < 0.5:",
+ length(flat_fdr_snr_cpgs),"\n\n")
+
+cat("Number of CpGs kept for downstream analyses:",
+  length(cpgs_to_keep),"\n\n")
+```
+
+```{r}
+summary(snr_ratio_stable)
+hist(log10(snr_ratio_stable), breaks = 100)
+```
+
+"Refn's explicitly flagged that many of their significant DMPs had inter-individual variance comparable to or larger than the temporal signal (median ratio ~0.9, some CpGs as bad as 12.3), and treated a low ratio as the marker of a trustworthy age-marker CpG. That's the precedent to lean on here."
+
+```{r}
+snr_ratio_stable[c("cg21893210", "cg03370588")]
+## bottom 1%, next few percentiles, and median, to see where "chaotic" stops looking chaotic
+qs <- quantile(snr_ratio_stable, 
+               probs = c(0.001, 0.005, 0.01, 0.02, 0.05, 0.10, 0.50))
+qs
+
+## grab a few CpGs near each of these percentiles and replot their raw trajectories,
+## same style as your two example plots, to visually locate where the noise pattern
+## transitions to plausible signal
+```
+
+
+```{r}
+
+suppressWarnings( # Warnings relate to missing values which I am aware of
+for (i in sample(flat_fdr_snr_cpgs, 50)){
+  p <- getSpagPlot_big(
+  CpG = i,
+  mvals_bm = matrix.clean,
+  pheno = pheno_complete,
+  anno = anno,
+  value_type = "beta", #beta or m
+  y_limits = c(0,1),
+  age_unit = "years",
+  probe_ids = probe_ids,
+  sample_ids = sample_ids)
+  print(p)
+})
+
+```
+
+```{r}
+plot_gmm_hist(
+  cpg = "cg21148594", 
+  G_range = 1:3,
+  spline_intercepts=spline_int_BLUPs, # intercepts from spline model
+  int_cols, # intercept column names
+  legend_pos = "topleft",
+  show_empirical = FALSE
+  )
+```
+
+
+## K-means on "non-flat" CpGs
+
+Parallelization
+
+```{r}
+set.seed(2522)
+Ks <- 1:3
+# scale trajectories
+#traj_scaled <- scale_rows(Mhat_traj[rownames(Mhat_traj) %in% cpgs_to_keep, ])
+traj_scaled <- scale_rows(spline_summary_BLUPs[, .SD, .SDcols = c("ns1_est", "ns2_est", "ns3_est")])
+traj_scaled <- as.matrix(spline_summary_BLUPs[, .SD, .SDcols = c("ns1_est", "ns2_est", "ns3_est")])
+rownames(traj_scaled) <- spline_summary_BLUPs$CpG
+# sample CpGs for silhouette evaluation
+sil_idx <- sample(seq_len(nrow(traj_scaled)), 10000)
+traj_sil <- traj_scaled[sil_idx, , drop = FALSE]
+
+plan(multisession, workers = 12)
+
+t0 <- Sys.time() # Start time
+
+sil_vals <- future_sapply(Ks, function(k) {
+  set.seed(2522 + k)
+  fit <- kmeans(
+    traj_scaled, 
+    centers = k, 
+    nstart = 25, 
+    iter.max = 1000,
+    algorithm = "Hartigan-Wong")
+  # replicate a few times
+  sil_rep_vals <- replicate(5, { # do 5 times to start
+    idx <- sample(seq_len(nrow(traj_scaled)), 10000) # test 10k CpGs
+    sil <- silhouette(fit$cluster[idx], dist(traj_scaled[idx, , drop = F]))
+    mean(sil[, 3])
+    })
+  mean(sil_rep_vals)}, 
+  future.seed = T)
+
+plan(sequential) # release the cpu workers
+
+t1 <- Sys.time() # End time
+message("Silhouette runtime: ", 
+        round(as.numeric(difftime(t1, t0, units = "mins")), 2), 
+        " minutes")
+
+(best_k <- Ks[which.max(sil_vals)])
+
+plot(
+  Ks, sil_vals,
+  type = "b",
+  pch = 19,
+  xlab = "Number of Clusters (k)",
+  ylab = "Average Silhouette Width",
+  main = "Optimal k by Sampled Silhouette Score")
+
+abline(v = best_k, col = "red", lty = 2)
+
+```
+
+```{r}
+library(cluster)
+library(future.apply)
+
+Ks <- 2:15
+
+traj_scaled <- as.matrix(
+  spline_summary_BLUPs[
+    ,
+    .SD,
+    .SDcols = c("ns1_est", "ns2_est", "ns3_est")
+  ]
+)
+
+# Remove incomplete/non-finite rows
+valid <- complete.cases(traj_scaled) &
+  apply(traj_scaled, 1, function(x) all(is.finite(x)))
+
+traj_scaled <- traj_scaled[valid, , drop = FALSE]
+
+# Actually standardize the three coefficient dimensions
+traj_scaled <- scale(traj_scaled)
+
+plan(multisession, workers = 6)
+
+t0 <- Sys.time()
+
+sil_vals <- future_sapply(
+  Ks,
+  function(k) {
+
+    set.seed(2522 + k)
+
+    fit <- kmeans(
+      traj_scaled,
+      centers = k,
+      nstart = 25,
+      iter.max = 1000,
+      algorithm = "Hartigan-Wong"
+    )
+
+    sil_rep_vals <- replicate(5, {
+
+      idx <- sample(
+        seq_len(nrow(traj_scaled)),
+        size = min(5000L, nrow(traj_scaled))
+      )
+
+      sampled_clusters <- fit$cluster[idx]
+
+      # Silhouette is undefined if the sample contains fewer than
+      # two represented clusters
+      if (length(unique(sampled_clusters)) < 2L) {
+        return(NA_real_)
+      }
+
+      sil <- cluster::silhouette(
+        sampled_clusters,
+        stats::dist(traj_scaled[idx, , drop = FALSE])
+      )
+
+      if (!is.matrix(sil) || ncol(sil) < 3L) {
+        return(NA_real_)
+      }
+
+      mean(sil[, "sil_width"], na.rm = TRUE)
+    })
+
+    mean(sil_rep_vals, na.rm = TRUE)
+  },
+  future.seed = TRUE
+)
+
+plan(sequential)
+
+t1 <- Sys.time()
+
+message(
+  "Silhouette runtime: ",
+  round(as.numeric(difftime(t1, t0, units = "mins")), 2),
+  " minutes"
+)
+
+best_k <- Ks[which.max(sil_vals)]
+
+plot(
+  Ks,
+  sil_vals,
+  type = "b",
+  pch = 19,
+  xlab = "Number of clusters (k)",
+  ylab = "Average silhouette width",
+  main = "Optimal k by sampled silhouette score"
+)
+
+abline(v = best_k, col = "red", lty = 2)
+```
+
+
+```{r}
+kmeans_grid <- function(x, k_values = 3:12, nstart = 20, iter.max = 100) {
+  out <- future_lapply(k_values, function(k) {
+    message("Running kmeans for k = ", k)
+    km <- kmeans(x, centers = k, nstart = nstart, iter.max = iter.max,
+                 algorithm = "Hartigan-Wong")
+    list(
+      k = k,
+      km = km,
+      tot_withinss = km$tot.withinss,
+      betweenss = km$betweenss,
+      totss = km$totss,
+      ratio = km$betweenss / km$totss)
+  }, future.seed = TRUE)
+  
+  names(out) <- paste0("k", k_values)
+  out
+}
+
+# sum of squares (SS) method
+km_grid <- kmeans_grid(
+  x = traj_scaled,
+  k_values = 2:10,
+  nstart = 25,
+  iter.max = 1000)
+
+km_summary <- rbindlist(
+  lapply(km_grid, function(x) {
+    data.table(
+      k = x$k,
+      tot_withinss = x$tot_withinss,
+      betweenss = x$betweenss,
+      totss = x$totss,
+      ratio = x$ratio)
+  }))
+
+print(km_summary)
+```
+
+
+
+```{r}
+# run Kmeans
+set.seed(2522)
+km <- kmeans(traj_scaled, centers = best_k, nstart = 50)
+
+pred <- km$cluster
+pred_vector <- pred[match(rownames(Mhat_traj[rownames(Mhat_traj) %in% cpgs_to_keep, ]), names(pred))]
+table(km$cluster)
+
+cluster_df <- data.frame(
+  CpG = rownames(Mhat_traj[rownames(Mhat_traj) %in% cpgs_to_keep, ]),
+  pred = pred_vector)
+```
+
+```{r}
+clust1_cpgs <- cluster_df$CpG[cluster_df$pred==1]
+clust2_cpgs <- cluster_df$CpG[cluster_df$pred==2]
+clust3_cpgs <- cluster_df$CpG[cluster_df$pred==3]
+
+suppressWarnings( # Warnings relate to missing values which I am aware of
+for (i in sample(clust1_cpgs, 50)){
+  p <- getSpagPlot_big(
+  CpG = i,
+  mvals_bm = matrix.clean,
+  pheno = pheno_complete,
+  anno = anno,
+  value_type = "beta", #beta or m
+  y_limits = c(0,1),
+  age_unit = "years",
+  probe_ids = probe_ids,
+  sample_ids = sample_ids)
+  print(p)
+})
+```
+
+
+```{r}
+getSpagPlot_big(
+  CpG = "cg19157436",
+  mvals_bm = matrix.clean,
+  value_type = "beta",
+  y_limits = c(0, .20),
+  age_unit = "years",
+  pheno = pheno_complete,
+  anno = anno,
+  probe_ids = probe_ids,
+  sample_ids = sample_ids,
+  #group_col = "gender",
+  #facet_by_group = T,
+  legend = "none")
+```
+
+
+```{r}
+pca <- prcomp(traj_scaled)
+summary(pca)
+
+set.seed(2522)
+plot_idx <- sample(seq_len(nrow(traj_scaled)),10000)
+plot(
+  pca$x[plot_idx, 1],
+  pca$x[plot_idx, 2],
+  col = km$cluster[plot_idx],
+  pch = 16,
+  cex = 0.5)
+
+```
+
+```{r}
+cluster_means <- rowsum(traj_scaled, group = km$cluster) / 
+  as.vector(table(km$cluster))
+
+matplot(
+  ages,
+  t(cluster_means),
+  type = "l",
+  lty = 1,
+  lwd = 3,
+  xlab = "Age",
+  ylab = "Mean Beta",
+  main = "Cluster-average methylation trajectories")
+
+legend(
+  "topright",
+  legend = paste("Cluster", rownames(cluster_means)),
+  col = 1:nrow(cluster_means),
+  lty = 1,
+  lwd = 3)
+```
+
+
+```{r}
+pca$rotation[,1] %>% .[order(abs(.), decreasing = T)] %>% 
+  enframe(name = "variable", value = "loading")
+
+pca$rotation[,2] %>% .[order(abs(.), decreasing = T)] %>% 
+  enframe(name = "variable", value = "loading")
+
+```
+
+
+```{r}
+plot(
+  ages,
+  pca$rotation[,1],
+  type = "b",
+  pch = 19,
+  xlab = "Age",
+  ylab = "PC1 loading",
+  main = "PC1 trajectory pattern")
+
+plot(
+  ages,
+  pca$rotation[,2],
+  type = "b",
+  pch = 19,
+  xlab = "Age",
+  ylab = "PC2 loading",
+  main = "PC2 trajectory pattern")
+```
+
+
+ARI measues how well pairs of points are grouped
+* compares predicted clusters with true labels
+	*	1.0 → perfect agreement (clusters match exactly)
+	*	0.0 → random clustering (no better than chance)
+	*	< 0 → worse than random
+	
+	
+* "Cluster A shows increasing methylated/unmethylated signal with age”
+* “Cluster B shows decreasing relative methylation levels”
+* “Cluster C shows stable trajectories”
+
 
 
 ## dpGMM
 
 ```{r}
-cpg <- spline_intercepts$CpG[1]
+#cpg <- spline_int_BLUPs$CpG["cg26840333"]
+cpg <- "cg26840333"
 
-x <- as.numeric(spline_intercepts[CpG == cpg, ..int_cols])
+x <- as.numeric(spline_int_BLUPs_full[CpG == cpg, ..int_cols])
 x <- x[is.finite(x)]
 
-opts <- GMM_1D_opts()
-str(opts)
+opts <- dpGMM::GMM_1D_opts
+opts$KS <- 4
+opts$IC <- "BIC"
+opts$plot <- FALSE
+opts$quick_stop <- FALSE
+dpGMM::runGMM(x, opts = opts)
 ```
 
 Pick 25-50 w/visually confirmed sub-trajectories and compare McClust w/ dpGMM
@@ -3148,7 +3314,7 @@ res_df <- dplyr::bind_rows(res_list)
 
 ```{r}
 plot_gmm_hist(
-  cpg = "cg16269199", 
+  cpg = "cg26840333", 
   G_range = 1:3,
   spline_intercepts=spline_int_BLUPs, # intercepts from spline model
   int_cols, # intercept column names
@@ -3159,7 +3325,7 @@ plot_gmm_hist(
 
 ```{r}
 getSpagPlot_big(
-  CpG = "cg01858500",
+  CpG = "cg26840333",
   mvals_bm = matrix.clean,
   value_type = "beta",
   #y_limits = c(0.05, .2),
@@ -3168,10 +3334,62 @@ getSpagPlot_big(
   anno = anno,
   probe_ids = probe_ids,
   sample_ids = sample_ids,
-  #group_col = "CaseControl",
+  group_col = "Diarrhea",
   #facet_by_group = T,
   legend = "bottom")
 ```
+
+```{r}
+toPlot_cluster <- pheno %>% 
+  left_join(subj_data %>% select(maskid, cluster), by = "maskid")
+
+getSpagPlot_big(
+  CpG = "cg26840333",
+  mvals_bm = matrix.clean,
+  value_type = "beta",
+  #y_limits = c(0.05, .2),
+  age_unit = "years",
+  pheno = toPlot_cluster,
+  anno = anno,
+  probe_ids = probe_ids,
+  sample_ids = sample_ids,
+  group_col = "new_NK",
+  n_bins = 3,
+  #facet_by_group = T,
+  legend = "bottom")  
+
+```
+
+```{r}
+library(compositions)  # for clr(), or do it manually: log(x) - mean(log(x)) per row
+
+cell_cols <- c("new_Bcell", "new_CD4T", "new_CD8T", "new_Mono", "new_NK")
+
+comp_mat <- as.matrix(subj_data[, cell_cols])
+comp_clr <- t(apply(comp_mat, 1, function(x) log(x) - mean(log(x))))  # manual CLR
+
+pca_comp <- prcomp(comp_clr, scale. = TRUE)
+subj_data$comp_pc1 <- pca_comp$x[, 1]
+
+pheno_plot <- pheno %>% left_join(subj_data %>% select(maskid, comp_pc1), by = "maskid")
+
+getSpagPlot_big(
+  CpG = "cg26840333",
+  mvals_bm = matrix.clean,
+  value_type = "beta",
+  #y_limits = c(0.05, .2),
+  age_unit = "years",
+  pheno = pheno_plot,
+  anno = anno,
+  probe_ids = probe_ids,
+  sample_ids = sample_ids,
+  group_col = "comp_pc1",
+  n_bins = 3,
+  #facet_by_group = T,
+  legend = "bottom")  
+
+```
+
 
 ## RAM Usage
 

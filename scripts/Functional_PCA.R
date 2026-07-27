@@ -34,24 +34,7 @@ attr(ns_basis, "Boundary.knots")
 og_knots <- attr(ns_basis, "knots")  
 og_boundary <- attr(ns_basis, "Boundary.knots")
 
-# Evenly spaced, fine grid across the observed age range
-# (evenly spaced matters here -- unlike your saved pred_age_* columns,
-#  which were unevenly spaced and would bias distance/integration below)
-fine_ages <- seq(og_boundary[1], og_boundary[2], length.out = 100)
 
-# Rebuild the spline basis ONCE (same basis is reused for every CpG)
-ns_basis_fine <- ns(fine_ages, knots = og_knots,
-                    Boundary.knots = og_boundary)
-
-# Build a matrix: rows = CpGs, columns = fine_ages (100 evenly spaced points)
-# This is the "dense functional data" input to fPCA
-traj_matrix <- with(spline_summary_BLUPs,
-                    outer(fixed_intercept, rep(1, length(fine_ages))) +
-                      outer(ns1_est, ns_basis_fine[, 1]) +
-                      outer(ns2_est, ns_basis_fine[, 2]) +
-                      outer(ns3_est, ns_basis_fine[, 3]))
-rownames(traj_matrix) <- spline_summary_BLUPs$CpG
-# traj_matrix: n_CpGs x 100 matrix of predicted methylation (M or beta) values
 
 ##############################################################################
 # OPTION A: fPCA using the `refund` package (fpca.face) -- fast, recommended
@@ -59,8 +42,8 @@ rownames(traj_matrix) <- spline_summary_BLUPs$CpG
 ##############################################################################
 
 fpca_fit <- fpca.face(
-  Y = traj_matrix, 
-  argvals = fine_ages, 
+  Y = Mhat_traj[rownames(Mhat_traj) %in% cpgs_to_keep, ], 
+  argvals = ages, 
   #pve = 0.95,
   npc = 4
   )
@@ -73,7 +56,7 @@ fpca_fit$evalues / sum(fpca_fit$evalues)
 # These are your new, LOW-DIMENSIONAL, UNCORRELATED shape features
 fpca_scores <- as.matrix(fpca_fit$scores)
 colnames(fpca_scores) <- paste0("fPC", seq_len(ncol(fpca_scores)))
-rownames(fpca_scores) <- rownames(traj_matrix)
+rownames(fpca_scores) <- rownames(Mhat_traj)
 
 head(fpca_scores)
 
@@ -89,7 +72,7 @@ sum(fpca_fit$evalues[1:4]) / sum(fpca_fit$evalues)
 
 par(mfrow = c(2, 2))
 for (k in 1:ncol(fpca_fit$efunctions)) {
-  plot(fine_ages, fpca_fit$efunctions[, k], type = "l", lwd = 2,
+  plot(ages, fpca_fit$efunctions[, k], type = "l", lwd = 2,
        main = paste0("Eigenfunction ", k,
                      " (", round(100 * fpca_fit$evalues[k] /
                                    sum(fpca_fit$evalues), 4), "% var)"),
@@ -103,11 +86,12 @@ par(mfrow = c(1, 1))
 mean_curve <- fpca_fit$mu
 pc1_sd <- sd(fpca_scores[, "fPC1"])
 
-plot(fine_ages, mean_curve, type = "l", lwd = 2, ylim = range(traj_matrix),
+plot(ages, mean_curve, type = "l", lwd = 2, 
+     ylim = range(Mhat_traj[rownames(Mhat_traj) %in% cpgs_to_keep, ]),
      main = "Mean trajectory +/- 2 SD along fPC1", xlab = "Age", ylab = "Methylation")
-lines(fine_ages, mean_curve + 2 * pc1_sd * fpca_fit$efunctions[, 1],
+lines(ages, mean_curve + 2 * pc1_sd * fpca_fit$efunctions[, 1],
       col = "firebrick", lwd = 2, lty = 2)
-lines(fine_ages, mean_curve - 2 * pc1_sd * fpca_fit$efunctions[, 1],
+lines(ages, mean_curve - 2 * pc1_sd * fpca_fit$efunctions[, 1],
       col = "steelblue", lwd = 2, lty = 2)
 legend("topleft", c("Mean", "+2SD fPC1", "-2SD fPC1"),
        col = c("black", "firebrick", "steelblue"), lty = c(1, 2, 2), lwd = 2)
@@ -123,7 +107,7 @@ wss <- sapply(2:8, function(k) kmeans(fpca_scores, centers = k, nstart = 25)$tot
 plot(2:8, wss, type = "b", xlab = "Number of clusters (k)", ylab = "Within-cluster SS")
 
 # Fit k-means with your chosen k (e.g., k = 4)
-km_fit <- kmeans(fpca_scores, centers = 4, nstart = 25)
+km_fit <- kmeans(fpca_scores, centers = 2, nstart = 25)
 
 spline_summary_BLUPs$fpca_cluster <- km_fit$cluster[
   match(spline_summary_BLUPs$CpG, rownames(fpca_scores))
